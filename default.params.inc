@@ -1,3 +1,5 @@
+<?php
+
 // Edit this file to customize for your site.
 //
 // The following parameters define your connection to the CiviCRM database:

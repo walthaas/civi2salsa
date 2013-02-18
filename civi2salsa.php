@@ -36,6 +36,9 @@ global $contact_ids;
 // array of CiviCRM contribution status codes
 global $contribution_status;
 
+// array of CiviCRM contribution type codes
+global $contribution_types;
+
 // array of CiviCRM county codes and names
 global $county;
 
@@ -147,6 +150,9 @@ delete_objects($curl, 'groups');
 // Get contribution status codes
 get_contribution_status($civi);
 
+// Get contribution type codes
+get_contribution_type($civi);
+
 // Get county codes from civicrm_county
 get_county($civi);
 
@@ -187,7 +193,7 @@ cvt_group($civi, $curl);
 cvt_contact($civi, $curl);
 
 // Read civicrm_pledge and convert to Salsa recurring_donation table
-//cvt_pledge($civi, $curl);
+cvt_pledge($civi, $curl);
 
 // Read civicrm_contribution_recur and convert to Salsa recurring_donation table
 cvt_contribution_recur($civi, $curl);
@@ -900,7 +906,7 @@ function cvt_contact(mysqli $civi, $curl) {
  */
 function cvt_contribution(mysqli $civi, $curl) {
 
-  global $honor_type, $payment_instrument;
+  global $contribution_types, $honor_type, $payment_instrument;
 
   echo "Adding donations to Salsa\n";
 
@@ -909,20 +915,6 @@ function cvt_contribution(mysqli $civi, $curl) {
 
   // Drop the salsa_key_index from this table
   drop_salsa_key_index($civi, 'civicrm_contribution');
-
-  // Read the civicrm_contribution_type table into memory
-  $contribution_types = array();
-  $query = 'SELECT * FROM civicrm_contribution_type';
-  $civi_contribution_types = $civi->query($query);
-  if ($civi_contribution_types === FALSE) {
-    printf("Failed to '$query': %s\n", $civi->error);
-    exit(1); 
-  }
-  while ($civi_contribution_type = $civi_contribution_types->fetch_assoc()) {
-    $contribution_types[$civi_contribution_type['id']] =
-      $civi_contribution_type;
-  }
-  //print_r($contribution_types);
 
   // Count donations added to Salsa
   $i = 0;
@@ -1729,8 +1721,207 @@ function cvt_participant(mysqli $civi, $curl) {
 
 /**
  *  Convert civicrm_pledge table to Salsa recurring_donation table
+ *
+ *  Salsa makes a distinction between pledges and recurring donations
+ *  such that pledges generate a reminder to the donor but recurring
+ *  donations are assumed to be associated with an automatic recurring
+ *  charge through the payment gateway.  CiviCRM in general makes this
+ *  distinction less clear and Save Our Canyons erases the distinction
+ *  completely because all recurring charges are entered manually, so
+ *  a pledge is effectively a recurring donation.
+ *
+ *  Therefore we convert civicrm_pledge to recurring_donation rather
+ *  than the Salsa pledge table as you might expect.
  */
 function cvt_pledge(mysqli $civi, $curl) {
+
+  global $contribution_status, $contribution_types;
+  
+  echo "Adding CiviCRM pledges to Salsa recurring donations\n";
+
+  // Add a 'salsa_key' column to civicrm_pledge
+  add_salsa_key($civi, 'civicrm_pledge');
+
+  // Drop the salsa_key_index from this table
+  drop_salsa_key_index($civi, 'civicrm_pledge');
+
+  // Count recurring donations added to Salsa
+  $i = 0;
+
+  // Date right now
+  $now = new DateTime();
+
+  // Check all contacts in CiviCRM  
+  $civi_contacts = query_contacts($civi);
+  while ($civi_contact = $civi_contacts->fetch_assoc()) {
+
+    // For this contact, find their recurring contributions in
+    // civicrm_pledge
+    $query = 'SELECT * FROM civicrm_pledge WHERE contact_id = ' .
+      $civi_contact['id'];
+    //printf("Query: '%s'\n", $query);
+    $civi_pledges = $civi->query($query);
+    if ($civi_pledges === FALSE) {
+      printf("Failed to'%s': %s\n", $query, $civi->error);
+      exit(1); 
+    }
+    while ($civi_pledge = $civi_pledges->fetch_assoc()) {
+      if ($civi_pledge['is_test']) {
+        continue;
+      }
+      $salsa_recurring_donation = array();
+      $salsa_recurring_donation['supporter_KEY'] = $civi_contact['salsa_key'];
+      //$salsa_recurring_donation['donation_KEY'] = ?;
+      //$salsa_recurring_donation['merchant_account_KEY'] = ?;
+      //$salsa_recurring_donation['Transaction_Date'] = ?;
+      //$salsa_recurring_donation['RPREF'] = ?;
+      //$salsa_recurring_donation['TRXPNREF'] = ?;
+      //$salsa_recurring_donation['RESULT'] = ?;
+      //$salsa_recurring_donation['PROFILEID'] = ?;
+      //$salsa_recurring_donation['RESPMSG'] = ?;
+      $salsa_recurring_donation['amount'] =
+        $civi_pledge['amount'];
+      $salsa_recurring_donation['Start_Date'] =
+        $civi_pledge['start_date'];
+      switch ($civi_pledge['frequency_unit']) {
+        case 'day':
+          // Save Our Canyons doesn't use this
+          break;
+
+        case 'week':
+          // Save Our Canyons doesn't use this
+          break;
+
+        case 'month':
+          switch ($civi_pledge['frequency_interval']) {
+            case '1':
+              $salsa_recurring_donation['PAYPERIOD'] = 'MONT';
+              break;
+
+            case '2':
+              printf("Oops, recurring donation %d every two months\n",
+                $civi_pledge['id']);
+              break;
+
+            case '3':
+              $salsa_recurring_donation['PAYPERIOD'] = 'QTER';
+              break;
+
+            case '6':
+              $salsa_recurring_donation['PAYPERIOD'] = 'SMYR';
+              break;
+
+            case '12':
+              $salsa_recurring_donation['PAYPERIOD'] = 'YEAR';
+              break;
+
+            default:
+	  }
+          break;
+
+        case 'year':
+          // Save Our Canyons doesn't use this
+          break;
+
+        default:
+      }
+
+
+      $salsa_recurring_donation['Term'] =
+        $civi_pledge['installments'];
+      //$salsa_recurring_donation['Tracking_Code'] = ?;
+      //$salsa_recurring_donation['Designation_Code'] = ?;
+      //$salsa_recurring_donation['Email'] = ?;
+      $salsa_recurring_donation['First_Name'] = $civi_contact['first_name'];
+      $salsa_recurring_donation['Last_Name'] = $civi_contact['last_name'];
+      //$salsa_recurring_donation['Tax_Status'] = ?;
+
+      // FIXME: contribution type?
+      
+      switch ($contribution_status[$civi_pledge['status_id']]) {
+      case 'Cancelled':
+      case 'Completed':
+        $salsa_recurring_donation['Status'] = 'Inactive';
+	break;
+
+      case 'Failed':
+      case 'In Progress':
+      case 'Overdue':
+      case 'Pending':
+        $salsa_recurring_donation['Status'] = 'Active';
+	break;
+
+      default:
+      }
+
+      /* Is any of this logic really needed?
+      // We need to figure out whether this recurring contribution is still
+      // active or has completed.
+      if (!empty($civi_pledge['end_date'])) {
+        echo "pledge ends " . $civi_pledge['end_date'] . "\n";
+        $last = new DateTime($civi_pledge['end_date']);
+        if ($now > $last) {
+          echo "  marking inactive\n";
+          $salsa_recurring_donation['Status'] = 'Inactive';
+        }
+      }
+      elseif (!empty($civi_pledge['installments'])
+        && ($civi_pledge['installments'] > 1)) {
+
+        // No end date stored for this pledge so we need to compute
+        // whether it is complete from the start date and number of
+        // installments.
+        $start = new DateTime($civi_pledge['start_date']);
+        //echo "civicrm_pledge " .
+        //  $civi_pledge['id'] . ":\n";
+        //echo "  start date: " . $start->format('Y-m-d') .  "\n";
+        //echo "  installments: " . $civi_pledge['installments'] ."\n";
+        //echo "  interval: " . $civi_pledge['frequency_interval'] .
+        //  " months\n";
+        $duration = new DateInterval('P' .
+          (string) ($civi_pledge['installments'] - 1) *
+          $civi_pledge['frequency_interval']  . 'M');
+        //echo "  duration: " . $duration->format('%m') . " months\n";
+        $last =  $start->add($duration);
+        //echo "  last date: " . $last->format('Y-m-d') .  "\n";
+        // If today is after the date of the last installment, the
+        // pledge is complete.  'Inactive' is the nearest thing Salsa
+        // offers so change the status to 'Inactive'.
+        if ($now > $last) {
+          //echo "  marking inactive\n";
+          $salsa_recurring_donation['Status'] = 'Inactive';
+        }
+      }
+      */
+
+      //$salsa_recurring_donation['Note'] = ?;
+      //$salsa_recurring_donation['Error_Message'] = ?;
+      //$salsa_recurring_donation['source_donation_KEY'] = ?;
+      //$salsa_recurring_donation['current_reference_donation_KEY'] = ?;
+      //$salsa_recurring_donation['run_one_transaction'] = ?;
+      //$salsa_recurring_donation['donate_page_KEY'] = ?;
+      //$salsa_recurring_donation['cc_type'] = ?;
+      //$salsa_recurring_donation['Credit_Card_Expiration'] = ?;
+      //echo "civi_pledge:\n"; print_r($civi_pledge);
+      //echo "salsa_recurring_donation:\n"; print_r($salsa_recurring_donation);
+      //echo "\n";
+      $salsa_key = save_salsa($curl, 'recurring_donation',
+        $salsa_recurring_donation, $civi_pledge);
+      //echo "salsa_key: $salsa_key\n";
+      $query = "UPDATE civicrm_pledge SET salsa_key = $salsa_key
+        WHERE id = " . $civi_pledge['id']; 
+      if (($result = $civi->query($query)) === FALSE) {
+        printf("Failed to %s: %s\n", $query, $civi->error);
+        exit(1);
+      }
+      $i++;
+    }
+  }
+
+  // Add an index on salsa_key to this table
+  add_salsa_key_index($civi, 'civicrm_pledge');
+
+  printf("Converted %d CiviCRM pledges to Salsa recurring donations\n", $i);
 }
 
 /**
@@ -1885,8 +2076,30 @@ function get_contribution_status(mysqli $civi) {
     $contribution_status[$civi_contribution_status['value']] = 
       $civi_contribution_status['label'];
   }
+  //print_r($contribution_status);
 }
 
+/**
+ *  Get contribution type codes
+ */
+function get_contribution_type(mysqli $civi) {
+
+  global $contribution_types;
+
+  // Read the civicrm_contribution_type table into memory
+  $contribution_types = array();
+  $query = 'SELECT * FROM civicrm_contribution_type';
+  $civi_contribution_types = $civi->query($query);
+  if ($civi_contribution_types === FALSE) {
+    printf("Failed to '$query': %s\n", $civi->error);
+    exit(1); 
+  }
+  while ($civi_contribution_type = $civi_contribution_types->fetch_assoc()) {
+    $contribution_types[$civi_contribution_type['id']] =
+      $civi_contribution_type;
+  }
+  //print_r($contribution_types);
+}
 
 /**
  * Get CiviCRM county codes and names
