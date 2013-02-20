@@ -141,6 +141,9 @@ delete_objects($curl, 'soft_credit');
 // Delete all donation objects from Salsa
 delete_objects($curl, 'donation');
 
+// Delete all recurring_donation objects from Salsa
+delete_objects($curl, 'recurring_donation');
+
 // Delete all current supporters from Salsa
 delete_objects($curl, 'supporter');
 
@@ -540,7 +543,9 @@ function cvt_group(mysqli $civi, $curl) {
     exit(1);
   }
 
-  printf("Adding %d groups to Salsa ...", $civi_groups->num_rows);
+  $num_groups = $civi_groups->num_rows;
+  printf("Adding %d groups to Salsa\n", $num_groups);
+  $i = 0;
   while ($civi_group = $civi_groups->fetch_assoc()) {
     $salsa_groups = array();
     $salsa_groups['Group_Name']  = $civi_group['name'];
@@ -580,15 +585,22 @@ function cvt_group(mysqli $civi, $curl) {
       exit(1);
     }
     $group_table[$civi_group['id']] = $salsa_key;
+    $i++;
+    show_status($i, $num_groups);
   }
   //print_r($group_table);
   // Add an index on salsa_key to this table
   add_salsa_key_index($civi, 'civicrm_group');
-  echo " done\n";
 }
 
 /**
  *  Convert civicrm_contact table to Salsa supporters table
+ *
+ *  Iterate through the contacts in the civicrm_contact table,
+ *  converting each row to a row in the Salsa supporters table.  Grab
+ *  the supporter_KEY value from Salsa row insertion and store it in
+ *  the new salsa_key column of the corresponding row in
+ *  civicrm_contact for future reference. 
  *
  *  The civicrm_contact table stores names in multiple ways:
  *    sort_name column:
@@ -602,6 +614,8 @@ function cvt_group(mysqli $civi, $curl) {
  *      Legal Name.
  *    first_name, middle_name, last_name, prefix_id, suffix_id columns
  *    organization_name column
+ *    addressee_custom column
+ *    addressee_display column
  *  These various forms of names may be used inconsistently.
  *  In contrast the Salsa supporter table has
  *    Title column
@@ -609,18 +623,27 @@ function cvt_group(mysqli $civi, $curl) {
  *    MI column
  *    Last_Name column
  *    Suffix column
- *  So part of what we do here is try to figure out where to put the various
- *  pieces of civicrm_contact name into the Salsa supporter table.
+ *  So part of what we do here is try to figure out where to put the
+ *  various pieces of civicrm_contact name into the Salsa supporter
+ *  table. Salsa displays First_Name or Last_Name on different
+ *  screens.  We seem to get best results with organizations by
+ *  putting the organization name in the Last_Name field.
  *
- *  The civicrm_email table can store an indefinite number of email addresses
- *  per contact.  Each email address is stored with additional information
- *  that categorizes that address in various ways.  In contrast the Salsa
- *  supporter table stores up to two email addresses.  We find that, if we
- *  throw away all of the category information in civicrm_email, in the case
- *  of Save Our Canyons each contact has at most two unique email addresses so
- *  a direct conversion is possible.
+ *  The civicrm_email table can store an indefinite number of email
+ *  addresses per contact.  Each email address is stored with
+ *  additional information that categorizes that address in various
+ *  ways.  In contrast the Salsa supporter table stores up to two
+ *  email addresses.  We find that, if we throw away all of the
+ *  category information in civicrm_email, in the case of Save Our
+ *  Canyons each contact has at most two unique email addresses so a
+ *  direct conversion is possible.
  *
- *  @todo Handle organization type contacts correctly
+ *  Salsa tries to merge any inserted supporter with an existing
+ *  supporter row that has the same email.  To prevent this, we store
+ *  the supporter row without an email, then use the row key to insert
+ *  the email(s) as an update.  Salsa rejects any email address it
+ *  deems to be invalid, including some that pass the PHP email
+ *  validation screen, so we ignore an error from this update.
  */
 function cvt_contact(mysqli $civi, $curl) {
 
@@ -637,7 +660,9 @@ function cvt_contact(mysqli $civi, $curl) {
 
   // Read the civicrm_contact table and convert to Salsa supporter table
   $civi_contacts = query_contacts($civi);
-  printf("Adding %d supporters to Salsa ...", $civi_contacts->num_rows);
+  $num_contacts = $civi_contacts->num_rows;
+  $i = 0;
+  printf("Adding %d supporters to Salsa\n", $num_contacts);
   while ($civi_contact = $civi_contacts->fetch_assoc()) {
     $salsa_supporter = array();
     $salsa_supporter['key'] = 0;
@@ -710,7 +735,8 @@ function cvt_contact(mysqli $civi, $curl) {
     //$salsa_supporter['Status'] = ?;
     $salsa_supporter['uid'] = $civi_contact['id'];
     // civicrm_contact uses the xx_XX form of language code.
-    // Salsa stores only the first three characters.
+    // Salsa stores only the first three characters.  Save Our Canyons
+    // doesn't actuall use the language code.
     $salsa_supporter['Language_Code'] = 'eng';
 
     // Get this contact's phones from civicrm_phone
@@ -810,6 +836,8 @@ function cvt_contact(mysqli $civi, $curl) {
       }
     }
 
+    // Store the Salsa supporter row, grab the supporter_KEY value and
+    // store it in the original civicrm_contact row.
     $salsa_key = save_salsa($curl, 'supporter', $salsa_supporter,
       $civi_contact);
     $query = "UPDATE civicrm_contact SET salsa_key = $salsa_key WHERE id = "
@@ -831,6 +859,10 @@ function cvt_contact(mysqli $civi, $curl) {
     // Find unique email addresses by discarding category information
     $email_ary = array();
     while ($civi_email = $civi_emails->fetch_assoc()) {
+      if (!filter_var($civi_email['email'], FILTER_VALIDATE_EMAIL)) {
+        // Ignore any email considered invalid
+        continue;
+      }
       $email_ary[$civi_email['email']] = TRUE;
     }
     $emails = array_keys($email_ary);
@@ -860,11 +892,14 @@ function cvt_contact(mysqli $civi, $curl) {
       $xml = curl_exec($curl);
       $response = new SimpleXMLElement($xml);
       if ($response->error) {    
+        // Emit an error message then ignore the error.  Salsa has a
+        // more aggressive screen for bad emails than PHP filter_var()
+        // so some bad emails just won't be stored.
         printf("Failed to store email(s) for contact %d: %s\n",
           $civi_contact['id'], $response->error);
-        echo "URL: $url\n";
-        echo "XML: "; print_r($xml); echo "\n";
-        exit(1);
+        //echo "URL: $url\n";
+        //echo "XML: "; print_r($xml); echo "\n";
+        //exit(1);
       }
     }
 
@@ -876,12 +911,14 @@ function cvt_contact(mysqli $civi, $curl) {
         break;
       }
     }
+    $i++;
+    show_status($i, $num_contacts);
   }
 
-  // Add an index on salsa_key to this table
+  // All rows of civicrm_contact now have a value in salsa_key, so edd
+  // an index on salsa_key to this table.
   add_salsa_key_index($civi, 'civicrm_contact');
 
-  echo " done\n";
   //print_r($relationships);
   if ($multi_emails) {
     printf("%d contacts have more than two emails\n", $multi_emails);
@@ -921,7 +958,11 @@ function cvt_contribution(mysqli $civi, $curl) {
 
   // Check all contacts in CiviCRM  
   $civi_contacts = query_contacts($civi);
+  $num_contacts = $civi_contacts->num_rows;
   while ($civi_contact = $civi_contacts->fetch_assoc()) {
+    if (empty($civi_contact['salsa_key'])) {
+      continue;
+    }
 
     // For this contact, find their contributions in civicrm_contribution
     $query = 'SELECT * FROM civicrm_contribution WHERE contact_id = ' .
@@ -1103,14 +1144,13 @@ function cvt_contribution(mysqli $civi, $curl) {
         printf("Failed to %s: %s\n", $query, $civi->error);
         exit(1);
       }
-      $i++;
     }
+    $i++;
+    show_status($i, $num_contacts);
   }
 
   // Add an index on salsa_key to this table
   add_salsa_key_index($civi, 'civicrm_contribution');
-
-  printf("Added %d donations to Salsa\n", $i);
 }
 
 /**
@@ -1119,6 +1159,8 @@ function cvt_contribution(mysqli $civi, $curl) {
 function cvt_contribution_recur(mysqli $civi, $curl) {
 
   global $contribution_status;
+
+  echo "Converting CiviCRM recurring contributions to Salsa\n";
 
   // Add a 'salsa_key' column to civicrm_contribution_recur
   add_salsa_key($civi, 'civicrm_contribution_recur');
@@ -1134,7 +1176,11 @@ function cvt_contribution_recur(mysqli $civi, $curl) {
 
   // Check all contacts in CiviCRM  
   $civi_contacts = query_contacts($civi);
+  $num_contacts = $civi_contacts->num_rows;
   while ($civi_contact = $civi_contacts->fetch_assoc()) {
+    if (empty($civi_contact['salsa_key'])) {
+      continue;
+    }
 
     // For this contact, find their recurring contributions in
     // civicrm_contribution_recur
@@ -1180,7 +1226,7 @@ function cvt_contribution_recur(mysqli $civi, $curl) {
               break;
 
             case '2':
-              printf("Oops, recurring donation %d every two months\n",
+              printf("\nOops, recurring donation %d every two months\n",
                 $civi_contrib_recur['id']);
               break;
 
@@ -1290,14 +1336,13 @@ function cvt_contribution_recur(mysqli $civi, $curl) {
         printf("Failed to %s: %s\n", $query, $civi->error);
         exit(1);
       }
-      $i++;
     }
+    $i++;
+    show_status($i, $num_contacts);
   }
 
   // Add an index on salsa_key to this table
   add_salsa_key_index($civi, 'civicrm_contribution_recur');
-
-  printf("Converted %d recurring contributions from Civi to Salsa\n", $i);
 }
 
 /**
@@ -1305,11 +1350,12 @@ function cvt_contribution_recur(mysqli $civi, $curl) {
  */
 function cvt_contribution_soft(mysqli $civi, $curl) {
 
-  // Count soft credits added to Salsa
+  echo "Adding soft donations to Salsa\n";
   $i = 0;
 
   // Check all contacts in CiviCRM  
   $civi_contacts = query_contacts($civi);
+  $num_contacts = $civi_contacts->num_rows;
   while ($civi_contact = $civi_contacts->fetch_assoc()) {
 
     // For this contact, find their soft contributions in
@@ -1369,10 +1415,10 @@ function cvt_contribution_soft(mysqli $civi, $curl) {
       $salsa_key = save_salsa($curl, 'soft_credit', $salsa_soft_credit,
         $civi_contrib_soft);
       echo "salsa_key: $salsa_key\n";
-      $i++;
     }
+    $i++;
+    show_status($i, $num_contacts);
   }
-  printf("Added %d soft credits to Salsa\n", $i);
 }
 
 /**
@@ -1392,13 +1438,21 @@ function cvt_group_contact(mysqli $civi, $curl) {
 
   global $group_table;
 
+  echo "Adding supporter group memberships to Salsa\n";
+
   // Count supporter <=> group mappings
   $i = 0;
 
   // Check all contacts in CiviCRM  
   $civi_contacts = query_contacts($civi);
+  $num_contacts = $civi_contacts->num_rows;
   while ($civi_contact = $civi_contacts->fetch_assoc()) {
+    if (empty($civi_contact['salsa_key'])) {
+      continue;
+    }
 
+    //printf("groups for CID=%s key=%s: ",
+    //  $civi_contact['id'], $civi_contact['salsa_key']); 
     // For this contact, find their groups in civicrm_group_contact
     $query = 'SELECT * FROM civicrm_group_contact WHERE contact_id = ' .
       $civi_contact['id'];
@@ -1407,19 +1461,25 @@ function cvt_group_contact(mysqli $civi, $curl) {
       printf("Failed to'%s': %s\n", $query, $civi->error);
       exit(1); 
     }
+    //printf("found %d groups\n", $civi_groups->num_rows);
     while ($civi_group = $civi_groups->fetch_assoc()) {
       //print_r($civi_group);
       $salsa_supporter_group = array();
       $salsa_supporter_group['supporter_KEY'] = $civi_contact['salsa_key'];
+      if (!array_key_exists($civi_group['group_id'], $group_table)) {
+        printf("group id=%d is not in group table, ignoring\n",
+          $civi_group['group_id']); 
+        continue;
+      }
       $salsa_supporter_group['groups_KEY'] =
         $group_table[$civi_group['group_id']];
       // FIXME: any place to put civi status, location_id, email_id?
       $salsa_key = save_salsa($curl, 'supporter_groups',
 			      $salsa_supporter_group, $civi_group);
-      $i++;
     }
+    $i++;
+    show_status($i, $num_contacts);
   }
-  printf("Added %d supporter <=> group mappings to Salsa\n", $i);
 }
 
 /**
@@ -1450,12 +1510,15 @@ function cvt_event(mysqli $civi, $curl) {
   // Drop the salsa_key index
   drop_salsa_key_index($civi, 'civicrm_event');
 
+  echo "Adding events to Salsa\n";
+  $i = 0;
   $civi_events = $civi->query("SELECT * FROM civicrm_event");
   if ($civi_events === FALSE) {
     printf("Failed to SELECT * FROM civicrm_event: %s\n",
       $civi->error);
     exit(1); 
   }
+  $num_events = $civi_events->num_rows;
   while ($civi_event = $civi_events->fetch_assoc()) {
     $salsa_event = array();
     //$salsa_event['national_event_KEY'] = $civi_event['?'];
@@ -1552,11 +1615,12 @@ function cvt_event(mysqli $civi, $curl) {
       exit(1);
     }
     $event_table[$civi_event['id']] = $salsa_key;
+    $i++;
+    show_status($i, $num_events);
   }
 
   // Add an index on salsa_key
   add_salsa_key_index($civi, 'civicrm_event');
-  printf("Added %d events to Salsa\n", count($event_table));
 }
 
 /**
@@ -1634,9 +1698,14 @@ function cvt_participant(mysqli $civi, $curl) {
 
   // Check all contacts
   $civi_contacts = query_contacts($civi);
-  printf("Adding supporter_event rows to Salsa ...");
+  printf("Adding supporter_event rows to Salsa\n");
   $i = 0;
+  $num_contacts = $civi_contacts->num_rows;
   while($civi_contact = $civi_contacts->fetch_assoc()) {
+    if (empty($civi_contact['salsa_key'])) {
+      $i++;
+      continue;
+    }
     // CiviCRM allows multiple rows in civicrm_participant with the
     // same contact_id and event_id.  Salsa does not allow multiple
     // rows in supporter_event with the same supporter_KEY and event_KEY
@@ -1715,8 +1784,9 @@ function cvt_participant(mysqli $civi, $curl) {
       //print_r($salsa_sup_evt);
       $salsa_key = save_salsa($curl, 'supporter_event', $salsa_sup_evt);
     }
+    $i++;
+    show_status($i, $num_contacts);
   }
-  echo " done\n";
 }
 
 /**
@@ -1753,7 +1823,11 @@ function cvt_pledge(mysqli $civi, $curl) {
 
   // Check all contacts in CiviCRM  
   $civi_contacts = query_contacts($civi);
+  $num_contacts = $civi_contacts->num_rows;
   while ($civi_contact = $civi_contacts->fetch_assoc()) {
+    if (empty($civi_contact['salsa_key'])) {
+      continue;
+    }
 
     // For this contact, find their recurring contributions in
     // civicrm_pledge
@@ -1799,7 +1873,7 @@ function cvt_pledge(mysqli $civi, $curl) {
               break;
 
             case '2':
-              printf("Oops, recurring donation %d every two months\n",
+              printf("\nOops, recurring donation %d every two months\n",
                 $civi_pledge['id']);
               break;
 
@@ -1914,14 +1988,13 @@ function cvt_pledge(mysqli $civi, $curl) {
         printf("Failed to %s: %s\n", $query, $civi->error);
         exit(1);
       }
-      $i++;
     }
+    $i++;
+    show_status($i, $num_contacts);
   }
 
   // Add an index on salsa_key to this table
   add_salsa_key_index($civi, 'civicrm_pledge');
-
-  printf("Converted %d CiviCRM pledges to Salsa recurring donations\n", $i);
 }
 
 /**
@@ -1932,8 +2005,10 @@ function cvt_relationships(mysqli $civi, $curl) {
   global $relationships;
   //print_r($relationships);
 
-  $i = 0;
+  echo "Converting CiviCRM relationships to Salsa households\n";
 
+  $i = 0;
+  $num_rels = count($relationships);
   // Check each household in the $relationships table
   foreach ($relationships as $rid => $relationship) {
 
@@ -1948,6 +2023,7 @@ function cvt_relationships(mysqli $civi, $curl) {
       }
     }
     if (!$found_supporter) {
+      $i++;
       continue;
     }
 
@@ -1997,41 +2073,71 @@ function cvt_relationships(mysqli $civi, $curl) {
         //echo "supporter_household_KEY=$supporter_household_KEY\n";
       }
     }
-  $i++;
+    $i++;
+    show_status($i, $num_rels);
   }
-  printf("Added %d households to Salsa\n", $i);
+  echo "\n";
 }
 
 /**
  * Delete objects from Salsa
+ *
+ *  There are two practical problems with deleting all objects of a
+ *  type from Salsa:
+ *  1. getObjects.sjs only returns 500 objects at a time, so we don't
+ *     get a complete list.
+ *  2. Sometimes the delete fails.
+ *
+ *  So we work around this problem by keeping a list of keys of object
+ *  that have been deleted.
  */
 function delete_objects($curl, $object) {
 
-  $query = SALSA_URL .
-    '/api/getObjects.sjs?object=' . $object . '&include=' . $object . '_KEY';
-  curl_setopt($curl, CURLOPT_URL, $query);
-  $xml = curl_exec($curl);
-  //echo "\nXML:\n"; print_r($xml); echo "\n";
-  $objects = new SimpleXMLElement($xml);
-  //echo "\nelement:\n"; print_r($objects); echo "\n";
-  $n = count($objects->{$object}->item);
-  printf("Deleting %d %s objects from Salsa...", $n, $object);
-  if ($n == 0) {
-    echo " done\n";
-    return;
-  }
-  foreach ($objects->{$object}->item as $item) {
-    //printf("Deleting $object key=%d\n", $item->key);
-    $query = SALSA_URL . '/delete?xml&object=' . $object . '&key=' . $item->key;
-    //printf("Query: %s\n", $query);
+  $deleted_keys = array();
+  while (TRUE) {
+    $query = SALSA_URL .
+      '/api/getObjects.sjs?object=' . $object . '&include=' . $object . '_KEY';
     curl_setopt($curl, CURLOPT_URL, $query);
     $xml = curl_exec($curl);
-    $result = new SimpleXMLElement($xml);
-    //print_r($result);
-    //if (!$result->success) {
-    //  echo "Failed to '$query'\n";
-    //  exit(1);
-    //}
+    //echo "\nXML:\n"; print_r($xml); echo "\n";
+    $objects = new SimpleXMLElement($xml);
+    //echo "\nelement:\n"; print_r($objects); echo "\n";
+    $n = count($objects->{$object}->item);
+    printf("Deleting %d %s objects from Salsa...", $n, $object);
+    if ($n == 0) {
+      echo " done\n";
+      return;
+    }
+    $deleted_this_pass = 0;
+    foreach ($objects->{$object}->item as $item) {
+      $item_ary = (array)$item;
+      $key = $item_ary['key'];
+      //echo "Deleting $object key=$key\n";
+      if (array_key_exists($key, $deleted_keys)) {
+        // We already deleted this object once so its a zombie
+        continue;
+      }
+      $query = SALSA_URL . '/delete?xml&object=' . $object .
+        '&key=' . $key;
+      $deleted_keys[$key] = TRUE;
+      $deleted_this_pass++;
+      //printf("Query: %s\n", $query);
+      curl_setopt($curl, CURLOPT_URL, $query);
+      $xml = curl_exec($curl);
+      $result = new SimpleXMLElement($xml);
+      //print_r($result);
+      //if (!$result->success) {
+      //  echo "Failed to '$query'\n";
+      //  exit(1);
+      //}
+    }
+    if ($deleted_this_pass) {
+      echo "finished pass\n";
+    }
+    else {
+      echo "done\n";
+      return;
+    }
   }
   echo " done\n";
 }
@@ -2639,4 +2745,62 @@ function save_salsa($curl, $obj_name, array $obj_val, $civi_row = array()) {
       exit(1);     
     }
     return $key;
+}
+
+/**
+ * show a status bar in the console
+ * 
+ * <code>
+ * for($x=1;$x<=100;$x++){
+ *     show_status($x, 100);
+ *     usleep(100000);
+ * }
+ * </code>
+ *
+ * @param   int     $done   how many items are completed
+ * @param   int     $total  how many items are to be done total
+ * @param   int     $size   optional size of the status bar
+ * @return  void
+ *
+ */
+function show_status($done, $total, $size=30) {
+
+    static $start_time;
+
+    // if we go over our bound, just ignore it
+    if($done > $total) return;
+
+    if(empty($start_time)) $start_time=time();
+    $now = time();
+
+    $perc=(double)($done/$total);
+
+    $bar=floor($perc*$size);
+
+    $status_bar="\r[";
+    $status_bar.=str_repeat("=", $bar);
+    if($bar<$size){
+        $status_bar.=">";
+        $status_bar.=str_repeat(" ", $size-$bar);
+    } else {
+        $status_bar.="=";
+    }
+
+    $disp=number_format($perc*100, 0);
+
+    $rate = $done ? (($now-$start_time)/$done) : 0;
+    $left = $total - $done;
+    $eta = round($rate * $left, 2);
+
+    $elapsed = $now - $start_time;
+
+    $status_bar .= " remaining: " . number_format($eta) . " sec.  elapsed: " .
+      number_format($elapsed) . " sec.";
+    echo "$status_bar  ";
+    flush();
+
+    // when done, send a newline
+    if($done == $total) {
+        echo "\n";
+    }
 }
