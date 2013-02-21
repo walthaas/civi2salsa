@@ -1478,20 +1478,44 @@ function cvt_group_contact(mysqli $civi, $curl) {
       exit(1); 
     }
     //printf("found %d groups\n", $civi_groups->num_rows);
+    $url = '';
     while ($civi_group = $civi_groups->fetch_assoc()) {
-      //print_r($civi_group);
-      $salsa_supporter_group = array();
-      $salsa_supporter_group['supporter_KEY'] = $civi_contact['salsa_key'];
       if (!array_key_exists($civi_group['group_id'], $group_table)) {
         printf("group id=%d is not in group table, ignoring\n",
           $civi_group['group_id']); 
         continue;
       }
-      $salsa_supporter_group['groups_KEY'] =
+      $url .= '&object=supporter_groups&supporter_KEY=' .
+        $civi_contact['salsa_key'] . '&groups_KEY=' . 
         $group_table[$civi_group['group_id']];
-      // FIXME: any place to put civi status, location_id, email_id?
-      $salsa_key = save_salsa($curl, 'supporter_groups',
-			      $salsa_supporter_group, $civi_group);
+    }
+    if ($url != '') {
+      $url = SALSA_URL . '/save?xml' . $url;
+      //echo "URL: '$url'\n";
+      curl_setopt_array($curl,
+        array(
+          CURLOPT_URL        => $url,
+          CURLOPT_HTTPGET    => TRUE,
+        )
+      );
+      $xml = curl_exec($curl);
+      $pattern = '/<\?xml.*$/s';
+      $matches = array();
+      $result = preg_match($pattern, $xml, $matches);
+      if ($result != 1) {
+	echo "oops, expected XML not found!\n";
+      }
+      else {
+	$cleaned_xml = $matches[0];
+      }
+      $response = new SimpleXMLElement($cleaned_xml);
+      if ($response->error) {    
+	printf("Failed to store supporter_groups: %s", $response->error);
+	echo "\nURL: $url\n";
+	echo "\nXML:\n"; print_r($xml);
+	echo "\n";
+	exit(1);
+      }
     }
     $i++;
     show_status($i, $num_contacts);
