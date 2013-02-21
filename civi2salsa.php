@@ -30,6 +30,9 @@
 
 include 'params.inc';
 
+// Map of CiviCRM contact ID to Salsa supporter information
+global $civi_salsa;
+
 // List of contact id's to process.  If empty, process all contacts
 global $contact_ids;
 
@@ -68,9 +71,6 @@ global $payment_instrument;
 
 // array of CiviCRM individual name prefixes with codes
 global $prefix;
-
-// array of relationships found in civicrm_relationship
-global $relationships;
 
 // array of CiviCRM relationship types
 global $relationship_type;
@@ -132,6 +132,9 @@ delete_objects($curl, 'supporter_household');
 // Delete all household objects from Salsa
 delete_objects($curl, 'household');
 
+// Delete all supporter_supporter objects from Salsa
+delete_objects($curl, 'supporter_supporter');
+
 // Delete all event objects from Salsa
 delete_objects($curl, 'event');
 
@@ -183,9 +186,6 @@ get_prefix($civi);
 // Get relationship types from civicrm_relationship_type
 get_relationship_type($civi);
 
-// Get relationships from civicrm_relationship
-get_relationships($civi);
-
 // Get state/province codes from civicrm_state_province
 get_state($civi);
 
@@ -201,9 +201,11 @@ cvt_pledge($civi, $curl);
 // Read civicrm_contribution_recur and convert to Salsa recurring_donation table
 cvt_contribution_recur($civi, $curl);
 
-// Convert the $relationships table to Salsa households
-// and supporter_household connections
+// Read civicrm_relationship and convert to Salsa supporter_supporter table.
 cvt_relationships($civi, $curl);
+
+// Create Salsa households
+cvt_household($civi, $curl);
 
 // Read civicrm_group_contact and convert to Salsa supporter_groups table
 cvt_group_contact($civi, $curl);
@@ -647,7 +649,8 @@ function cvt_group(mysqli $civi, $curl) {
  */
 function cvt_contact(mysqli $civi, $curl) {
 
-  global $cntry, $county, $loc_type, $state, $prefix, $relationships;
+  global $civi_salsa, $cntry, $county, $loc_type, $state, $prefix,
+    $relationships;
 
   // Keep track of how many contacts have more than 2 unique emails
   $multi_emails = 0;
@@ -659,6 +662,7 @@ function cvt_contact(mysqli $civi, $curl) {
   drop_salsa_key_index($civi, 'civicrm_contact');
 
   // Read the civicrm_contact table and convert to Salsa supporter table
+  $civi_salsa = array();
   $civi_contacts = query_contacts($civi);
   $num_contacts = $civi_contacts->num_rows;
   $i = 0;
@@ -684,7 +688,7 @@ function cvt_contact(mysqli $civi, $curl) {
         $salsa_supporter['First_Name'] = $org_name;
       }
       else {
-        printf("Organization contact %d has null organization_name\n",
+        printf("\nOrganization contact %d has null organization_name\n",
 	       $civi_contact['id']);
       }
     }
@@ -842,6 +846,11 @@ function cvt_contact(mysqli $civi, $curl) {
       $civi_contact);
     $query = "UPDATE civicrm_contact SET salsa_key = $salsa_key WHERE id = "
       . $civi_contact['id']; 
+    $civi_salsa[$civi_contact['id']] = array(
+      'supporter_KEY' => $salsa_key,
+      'last_name'     => $civi_contact['last_name'],
+      'Receive_Mail'  => $salsa_supporter['Receive_Mail'],
+    );
     if (($result = $civi->query($query)) === FALSE) {
       printf("Failed to %s: %s\n", $query, $civi->error);
       exit(1);
@@ -902,7 +911,7 @@ function cvt_contact(mysqli $civi, $curl) {
         //exit(1);
       }
     }
-
+    /*
     // If this contact is in a domestic relationship, add their Salsa
     // key to their entry in $relationships
     foreach ($relationships as $rid => $relationship) {
@@ -911,6 +920,7 @@ function cvt_contact(mysqli $civi, $curl) {
         break;
       }
     }
+    */
     $i++;
     show_status($i, $num_contacts);
   }
@@ -1179,6 +1189,8 @@ function cvt_contribution_recur(mysqli $civi, $curl) {
   $num_contacts = $civi_contacts->num_rows;
   while ($civi_contact = $civi_contacts->fetch_assoc()) {
     if (empty($civi_contact['salsa_key'])) {
+      $i++;
+      show_status($i, $num_contacts);
       continue;
     }
 
@@ -1194,6 +1206,8 @@ function cvt_contribution_recur(mysqli $civi, $curl) {
     }
     while ($civi_contrib_recur = $civi_contribs_recur->fetch_assoc()) {
       if ($civi_contrib_recur['is_test']) {
+        $i++;
+        show_status($i, $num_contacts);
         continue;
       }
       $salsa_recurring_donation = array();
@@ -1448,6 +1462,8 @@ function cvt_group_contact(mysqli $civi, $curl) {
   $num_contacts = $civi_contacts->num_rows;
   while ($civi_contact = $civi_contacts->fetch_assoc()) {
     if (empty($civi_contact['salsa_key'])) {
+      $i++;
+      show_status($i, $num_contacts);
       continue;
     }
 
@@ -1621,6 +1637,172 @@ function cvt_event(mysqli $civi, $curl) {
 
   // Add an index on salsa_key
   add_salsa_key_index($civi, 'civicrm_event');
+}
+
+/**
+ *  Convert households
+ *
+ *  Normally we would convert civicrm_contact records of type Household
+ *  to Salsa household records here.  But Save Our Canyons did not use
+ *  CiviCRM households; instead they indicated households by creating
+ *  relationships of type 'Spouse of' or similar between household
+ *  members, then marked all but one of these contacts as
+ *  do_not_mail=TRUE so that only one paper mailing would go to that
+ *  household.
+ *
+ *  So what we do here is to scan the civicrm_relationship table for
+ *  clusters of related contacts, then generate a Salsa household from
+ *  that cluster.
+ */
+function cvt_household(mysqli $civi, $curl) {
+
+  global $relationship_type, $civi_salsa;
+
+  // Find the CiviCRM relationship types that define a household
+  $domestic = array();
+  $pattern = '/^Family|^Significant|^Spouse/';
+  foreach ($relationship_type as $id => $data) {
+    if (preg_match($pattern, $data)) {
+	$domestic[] =$id;
+      }
+  }
+
+  // Find the groups of contacts that are members of a household
+  $query = 'SELECT contact_id_a, contact_id_b FROM civicrm_relationship' .
+    ' WHERE relationship_type_id IN (' . implode(',', $domestic) . ')' .
+    ' AND is_active=1';
+  //echo "Query: $query\n";
+  $civi_relationships = $civi->query($query);
+  if ($civi_relationships === FALSE) {
+    printf("Failed to '%s': %s\n", $query, $civi->error);
+    exit(1);
+  }
+
+  echo "Searching for CiviCRM domestic relationships\n";
+  $i = 0;
+  $num_rels = $civi_relationships->num_rows;
+  $relationships = array();
+  while ($civi_relationship = $civi_relationships->fetch_assoc()) {
+    //echo "civi_relationship: "; print_r($civi_relationship); echo "\n";
+    //echo "relationships: "; print_r($relationships); echo "\n";
+    foreach($relationships as $key => $household) {
+      //echo "household: "; print_r($household); echo "\n";
+      if ((array_search($civi_relationship['contact_id_a'],
+        $relationships[$key]['members']) !== FALSE)
+        && (array_search($civi_relationship['contact_id_b'],
+        $relationships[$key]['members']) !== FALSE)) {
+        // Both contacts are already in this relationship
+        $i++;
+        show_status($i, $num_rels);
+        continue 2;
+      }
+      elseif ((array_search($civi_relationship['contact_id_a'],
+        $relationships[$key]['members']) !== FALSE)
+        && (array_search($civi_relationship['contact_id_b'],
+        $relationships[$key]['members']) === FALSE)) {
+        $relationships[$key]['members'][] = $civi_relationship['contact_id_b'];
+        //echo "added " . $civi_relationship['contact_id_b'] . " to household\n";
+        //echo "household: "; print_r($relationships[$key]); echo "\n";
+        $i++;
+        show_status($i, $num_rels);
+        continue 2;
+      }
+      elseif ((array_search($civi_relationship['contact_id_b'],
+        $relationships[$key]['members']) !== FALSE)
+        && (array_search($civi_relationship['contact_id_a'],
+        $relationships[$key]['members']) === FALSE)) {
+        $relationships[$key]['members'][] = $civi_relationship['contact_id_a'];
+        //echo "added " . $civi_relationship['contact_id_a'] . " to household\n";
+        //echo "household: "; print_r($relationships[$key]); echo "\n";
+        $i++;
+        show_status($i, $num_rels);
+        continue 2;
+      }
+    }
+    // No household has either of these contacts yet,
+    // so make a new household to contain them.
+    $relationships[] = array(
+      'members'   => array(
+        $civi_relationship['contact_id_a'],
+        $civi_relationship['contact_id_b'],
+      )
+    );
+    //echo "created new household\n";
+    $i++;
+    show_status($i, $num_rels);
+  }
+  //printf("Found %d domestic relationships in CiviCRM\n", count($relationships));
+  //print_r($relationships);
+  // At this point, $relationships is a list of clusters of contacts
+  // which share some kind of domestic relationship
+  echo "Converting domestic relationships to households\n";
+  $i = 0;
+  $num_rels = count($relationships);
+  // Check each household in the $relationships table
+  foreach ($relationships as $relationship) {
+
+    // Check whether this household has at least one member with a
+    // Salsa supporter_KEY.  If so we can add the household to Salsa
+    //print_r($relationship);
+    $found_supporter = FALSE;
+    foreach ($relationship['members'] as $contact_id) {
+      if (!empty($civi_salsa[$contact_id]['supporter_KEY'])
+        && !empty($civi_salsa[$contact_id]['Receive_Mail'])) {
+        $found_supporter = TRUE;
+        break;
+      }
+    }
+    if (!$found_supporter) {
+      $i++;
+      show_status($i, $num_rels);
+      continue;
+    }
+
+    // We found a household that can be added to Salsa.
+    // We need to find a name and point of contact for this household.
+    // We will use the lowest civicrm contact_id on the theory that
+    // this is the initial contact.
+    $low_contact_id = PHP_INT_MAX;
+    foreach ($relationship['members'] as $contact_id) {
+      if (!empty($civi_salsa[$contact_id]['supporter_KEY'])
+        && !empty($civi_salsa[$contact_id]['Receive_Mail'])
+        && ($contact_id < $low_contact_id)) {
+        $low_contact_id = $contact_id;
+        $point_KEY = $civi_salsa[$contact_id]['supporter_KEY'];
+      }
+    }
+    //echo "point contact_id =$low_contact_id supporter=$point_KEY\n";
+
+    // We found the lowest contact id.  Use contact's last name for family
+    $household = array(
+      'Household_Name' => $civi_salsa[$low_contact_id]['last_name'],
+      'supporter_KEY'  => $point_KEY,
+    );
+    //print_r($household);
+    $household_KEY = save_salsa($curl, 'household', $household);
+    //echo "household_KEY=$household_KEY\n";
+    //$relationships[$rid]['salsa_key'] = $household_KEY;
+
+    // Add every member of this household that has a supporter_KEY
+    //print_r($relationship['members']);
+    foreach ($relationship['members'] as $contact_id) {
+      if (empty($civi_salsa[$contact_id]['supporter_KEY'])) {
+        $i++;
+        show_status($i, $num_rels);
+        continue;
+      }
+      $supporter_household = array(
+        'household_KEY' => $household_KEY,
+        'supporter_KEY' => $civi_salsa[$contact_id]['supporter_KEY'],
+      );
+      //print_r($supporter_household);
+      $supporter_household_KEY = save_salsa($curl, 'supporter_household',
+        $supporter_household);
+      //echo "supporter_household_KEY=$supporter_household_KEY\n";
+    }
+    $i++;
+    show_status($i, $num_rels);
+  }
 }
 
 /**
@@ -1998,85 +2180,83 @@ function cvt_pledge(mysqli $civi, $curl) {
 }
 
 /**
- *  Convert the $relationships table to households and supporter_household
+ *  Convert the civicrm_relationship table to Salsa supporter_supporter
  */
 function cvt_relationships(mysqli $civi, $curl) {
 
-  global $relationships;
-  //print_r($relationships);
+  global $civi_salsa, $relationship_type;
 
-  echo "Converting CiviCRM relationships to Salsa households\n";
-
+  // Find the contacts that are related
+  $query = 'SELECT id, contact_id_a, contact_id_b, relationship_type_id ' .
+    'FROM civicrm_relationship WHERE is_active=1';
+  //echo "Query: $query\n";
+  $civi_relationships = $civi->query($query);
+  if ($civi_relationships === FALSE) {
+    printf("Failed to '%s': %s\n", $query, $civi->error);
+    exit(1);      
+  }
+  $num_rels = $civi_relationships->num_rows;
+  printf("Adding %d relationships to Salsa\n", $num_rels);
   $i = 0;
-  $num_rels = count($relationships);
-  // Check each household in the $relationships table
-  foreach ($relationships as $rid => $relationship) {
+  while ($civi_relationship = $civi_relationships->fetch_assoc()) {
+    // We can store a relationship in Salsa IFF we have Salsa keys
+    // for both of the contacts
+    if (!empty($civi_salsa[$civi_relationship['contact_id_a']]['supporter_KEY'])
+      && !empty($civi_salsa[$civi_relationship['contact_id_b']]['supporter_KEY'])) {
+      $sup_sup = array();
+      $sup_sup['supporter_KEY'] =
+        $civi_salsa[$civi_relationship['contact_id_b']]['supporter_KEY'];
+      //$sup_sup['helped_recruit'] = ?;
+      $sup_sup['supporter2_KEY'] =
+        $civi_salsa[$civi_relationship['contact_id_a']]['supporter_KEY'];
+      $type = $relationship_type[$civi_relationship['relationship_type_id']];
+      switch ($type) {
+        case 'Child of':
+          $sup_sup['Relationship'] = 'Child';
+          break;
 
-    // Check whether this household has at least one member
-    // with a Salsa supporter_KEY
-    //print_r($relationship);
-    $found_supporter = FALSE;
-    foreach ($relationship['members'] as $contact_id => $supporter_KEY) {
-      if ($supporter_KEY) {
-        $found_supporter = TRUE;
-        break;
+        case 'Spouse of':
+          $sup_sup['Relationship'] = 'Spouse';
+          break;
+
+        case 'Sibling of':
+          $sup_sup['Relationship'] = 'Sibling';
+          break;
+
+        case 'Employee of':
+          $sup_sup['Relationship'] = 'Employee';
+          break;
+
+        case 'Significant other of':
+          $sup_sup['Relationship'] = 'Partner';
+          break;
+
+        case 'Supervised by':
+          $sup_sup['Relationship'] = 'Boss';
+          break;
+
+        case 'Volunteer for':
+        case 'Head of Household for':
+        case 'Household Member of':
+        case 'Board member of':
+        case 'Executive director of':
+        case 'Donor to':
+        case 'Family Member of':
+          printf("\nOops, no Salsa equivalent to relationship type %s\n" .
+            "in civicrm_relationship.id=%d\n", $type,
+            $civi_relationship['id']);
+          break;
+
+        default:
       }
-    }
-    if (!$found_supporter) {
-      $i++;
-      continue;
-    }
-
-    // We found a household that can be added to Salsa.
-    // We need to find a name and point of contact for this household.
-    // We will use the lowest civicrm contact_id on the theory that
-    // this is the initial contact.
-    $low_contact_id = PHP_INT_MAX;
-    foreach ($relationship['members'] as $contact_id => $supporter_KEY) {
-      if (!empty($supporter_KEY) && ($contact_id < $low_contact_id)) {
-        $low_contact_id = $contact_id;
-        $point_KEY = $supporter_KEY;
-      }
-    }
-    //echo "point contact_id =$low_contact_id supporter=$point_KEY\n";
-
-    // We found the lowest contact id.  Use contact's last name for family
-    $query = 'SELECT last_name FROM civicrm_contact WHERE id= ' .
-      $low_contact_id;                
-    $civi_point = $civi->query($query);
-    if ($civi_point === FALSE) {
-      printf("Failed to '%s': %s\n", $query, $civi->error);
-      exit(1);
-    }
-    $point_name = $civi_point->fetch_assoc();
-    $household = array(
-      'Household_Name' => $point_name['last_name'],
-      'supporter_KEY'  => $point_KEY,
-    );
-    //print_r($household);
-    $household_KEY = save_salsa($curl, 'household', $household);
-    //echo "household_KEY=$household_KEY\n";
-    $relationships[$rid]['salsa_key'] = $household_KEY;
-
-    // Add every member of this household that has a supporter_KEY
-    //print_r($relationship['members']);
-    foreach ($relationship['members'] as $contact_id => $supporter_KEY) {
-      //echo "contact_id=$contact_id supporter_KEY=$supporter_KEY\n";
-      if ($supporter_KEY) {
-        $supporter_household = array(
-          'household_KEY' => $household_KEY,
-          'supporter_KEY' => $supporter_KEY,
-        );
-        //print_r($supporter_household);
-        $supporter_household_KEY = save_salsa($curl, 'supporter_household',
-          $supporter_household);
-        //echo "supporter_household_KEY=$supporter_household_KEY\n";
-      }
+      //echo "civi relation:"; print_r($civi_relationship); echo "\n";
+      //echo "sup_sup:"; print_r($sup_sup); echo "\n";
+      $salsa_key = save_salsa($curl, 'supporter_supporter', $sup_sup,
+        $civi_relationship);
     }
     $i++;
     show_status($i, $num_rels);
   }
-  echo "\n";
 }
 
 /**
@@ -2093,6 +2273,9 @@ function cvt_relationships(mysqli $civi, $curl) {
  */
 function delete_objects($curl, $object) {
 
+  // Maximum number of deletes with one API call
+  $max_del = 200;
+
   $deleted_keys = array();
   while (TRUE) {
     $query = SALSA_URL .
@@ -2103,12 +2286,16 @@ function delete_objects($curl, $object) {
     $objects = new SimpleXMLElement($xml);
     //echo "\nelement:\n"; print_r($objects); echo "\n";
     $n = count($objects->{$object}->item);
-    printf("Deleting %d %s objects from Salsa...", $n, $object);
+
+    printf("Deleting %d %s objects from Salsa...",
+      (($n > $max_del) ? $max_del : $n), $object);
     if ($n == 0) {
       echo " done\n";
       return;
     }
     $deleted_this_pass = 0;
+    $query = SALSA_URL . '/delete?xml';
+    $i = 0;
     foreach ($objects->{$object}->item as $item) {
       $item_ary = (array)$item;
       $key = $item_ary['key'];
@@ -2117,20 +2304,24 @@ function delete_objects($curl, $object) {
         // We already deleted this object once so its a zombie
         continue;
       }
-      $query = SALSA_URL . '/delete?xml&object=' . $object .
-        '&key=' . $key;
+      $query .= '&object=' . $object . '&key=' . $key;
       $deleted_keys[$key] = TRUE;
       $deleted_this_pass++;
-      //printf("Query: %s\n", $query);
-      curl_setopt($curl, CURLOPT_URL, $query);
-      $xml = curl_exec($curl);
-      $result = new SimpleXMLElement($xml);
-      //print_r($result);
-      //if (!$result->success) {
-      //  echo "Failed to '$query'\n";
-      //  exit(1);
-      //}
+      if ($i == $max_del) {
+        break;
+      }
+      $i++;
     }
+    //printf("Query: %s\n", $query);
+    curl_setopt($curl, CURLOPT_URL, $query);
+    $xml = curl_exec($curl);
+    //print_r($xml);
+    //$result = new SimpleXMLElement($xml);
+    //print_r($result);
+    //if (!$result->success) {
+    //  echo "Failed to '$query'\n";
+    //  exit(1);
+    //}
     if ($deleted_this_pass) {
       echo "finished pass\n";
     }
@@ -2598,7 +2789,8 @@ function get_relationship_type(mysqli $civi) {
   }
   $relationship_type = array();
   while ($civi_relationship_type = $civi_relationship_types->fetch_assoc()) {
-    $relationship_type[$civi_relationship_type['id']] = $civi_relationship_type;
+    $relationship_type[$civi_relationship_type['id']] =
+      $civi_relationship_type['name_a_b'];
   }
   //print_r($relationship_type);
 }
