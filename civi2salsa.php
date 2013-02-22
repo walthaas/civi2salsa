@@ -957,12 +957,6 @@ function cvt_contribution(mysqli $civi, $curl) {
 
   echo "Adding donations to Salsa\n";
 
-  // Add a 'salsa_key' column to civicrm_contribution
-  add_salsa_key($civi, 'civicrm_contribution');
-
-  // Drop the salsa_key_index from this table
-  drop_salsa_key_index($civi, 'civicrm_contribution');
-
   // Count donations added to Salsa
   $i = 0;
 
@@ -983,6 +977,7 @@ function cvt_contribution(mysqli $civi, $curl) {
       printf("Failed to'%s': %s\n", $query, $civi->error);
       exit(1); 
     }
+    $url = '';
     while ($civi_contribution = $civi_contributions->fetch_assoc()) {
       //print_r($civi_contribution);
       // Ignore test data
@@ -990,10 +985,7 @@ function cvt_contribution(mysqli $civi, $curl) {
         continue;
       }
 
-      $salsa_donation = array();
-      $salsa_donation['supporter_KEY'] = $civi_contact['salsa_key'];
-      //$salsa_donation['event_KEY'] = ?;
-      //$salsa_donation['donate_page_KEY'] = ?;
+      $url .= '&object=donation&supporter_KEY=' . $civi_contact['salsa_key'];
       if ($civi_contribution['contribution_recur_id']) {
         // This is part of a recurring donation.  Find the foreign
         // key to the recurring_donation table.
@@ -1001,43 +993,42 @@ function cvt_contribution(mysqli $civi, $curl) {
           . $civi_contribution['contribution_recur_id'];
         $recur = query_unique($civi, $query);
         if ($recur) {        
-          $salsa_donation['recurring_donation_KEY'] = $recur['salsa_key'];
+          $url .= '&recurring_donation_KEY=' . $recur['salsa_key'];
         }
       }
-      //$salsa_donation['membership_invoice_KEY'] = ?;
-      $salsa_donation['Transaction_Date'] = $civi_contribution['receive_date'];
-      //$salsa_donation['Date_Entered'] = ?;
-      $salsa_donation['amount'] = $civi_contribution['total_amount'];
-      $salsa_donation['Currency_Code'] = $civi_contribution['currency'];
+      $url .= '&Transaction_Date=' .
+         urlencode($civi_contribution['receive_date']) .
+        '&amount=' . $civi_contribution['total_amount'] .
+        '&Currency_Code=' .  $civi_contribution['currency'];
       if (!empty($civi_contribution['contribution_type_id'])) {
         switch ($contribution_types[$civi_contribution[
           'contribution_type_id']]['name']) {
         case 'Auction':
         case 'Sales':
-          $salsa_donation['Transaction_Type'] = 'Purchase';
-          $salsa_donation['Status'] = 'Order Fulfilled';
+          $transaction_type = 'Purchase';
+          $url .= '&Status=Order%20Fulfilled';
           break;
 
         case 'Event fee':
-          $salsa_donation['Transaction_Type'] = 'Event Fee';
-          $salsa_donation['Status'] = 'Event Fee';
+          $transaction_type = 'Event%20Fee';
+          $url .= '&Status=Event%20Fee';
           break;
 
         case 'Grant':
-          $salsa_donation['Transaction_Type'] = 'Donation';
-          $salsa_donation['Status'] = 'Donation Only';
+          $Transaction_Type = 'Donation';
+	  $url .= '&Status=Donation%20Only';
           break;
 
         case 'In-Kind':
-          $salsa_donation['Transaction_Type'] = 'In-Kind';
+          $transaction_type = 'In-Kind';
           break;
 
         case 'Membership':
-          $salsa_donation['Transaction_Type'] = 'Renewal';
+          $transaction_type = 'Renewal';
           break;
 
         default:
-          $salsa_donation['Transaction_Type'] = 'Other';
+          $transaction_type = 'Other';
           break;
         }
       }
@@ -1045,71 +1036,50 @@ function cvt_contribution(mysqli $civi, $curl) {
       // transaction type as 'Recurring' so it will show up on the
       // recurring donations page in Salsa.
       if (!empty($salsa_donation['recurring_donation_KEY'])) {
-        $salsa_donation['Transaction_Type'] = 'Recurring'; 
+        $transaction_type = 'Recurring'; 
       }
+      $url .= '&Transaction_Type=' . $transaction_type;
       if (!empty($civi_contribution['payment_instrument_id'])) {
         switch ($payment_instrument[$civi_contribution[
           'payment_instrument_id']]) {
         case 'Cash':
-          $salsa_donation['Form_Of_Payment'] = 'Cash';
+          $url .= '&Form_Of_Payment=Cash';
           break;
 
         case 'Check':
-          $salsa_donation['Form_Of_Payment'] = 'Check';
-          $salsa_donation['Order_Info'] = $civi_contribution['check_number'];
+          $url .= '&Form_Of_Payment=Check&Order_Info=' .
+            urlencode($civi_contribution['check_number']);
           break;
 
         case 'Credit Card':
         case 'Debit Card':
-          $salsa_donation['Form_Of_Payment'] = 'Credit Card';
-          $salsa_donation['PNREF'] = $civi_contribution['trxn_id'];
+          $url .= '&Form_Of_Payment=Credit%20Card&PNREF=' .
+            urlencode($civi_contribution['trxn_id']);
           break;
 
         case 'EFT':
-          $salsa_donation['Form_Of_Payment'] = 'Other';
+          $url .= '&Form_Of_Payment=Other';
           break;
 
         default:
-          $salsa_donation['Form_Of_Payment'] = 'Unknown';
+          $url .= '&Form_Of_Payment=Unknown';
         }
       }
       else {
-        $salsa_donation['Form_Of_Payment'] = 'Unknown';
+        $url .= '&Form_Of_Payment=Unknown';
       }
-      //$salsa_donation['cc_type'] = ?;
-      //$salsa_donation['Credit_Card_Digits'] = ?;
-      //$salsa_donation['Credit_Card_Expiration'] = ?;
-      //$salsa_donation['PNREF'] = ?;
-      //$salsa_donation['RESULT'] = ?;
-      //$salsa_donation['RESPMSG'] = ?;
-      //$salsa_donation['AUTHCODE'] = ?;
-      //$salsa_donation['AVS'] = ?;
-      //$salsa_donation['Order_Info'] = ?;
-      //$salsa_donation['Disbursement_Status'] = ?;
-      //$salsa_donation['Responsible_Party'] = ?;
-      //$salsa_donation['Date_Fulfilled'] = ?;
-      //$salsa_donation['PRIVATE_Complete_Summary'] = ?;
       if ($civi_contact['contact_type'] == 'Individual') {
-        $salsa_donation['First_Name'] = $civi_contact['first_name'];
-        $salsa_donation['Last_Name'] = $civi_contact['last_name'];
+        $url .= '&First_Name=' . urlencode($civi_contact['first_name']) .
+          '&Last_Name=' . urlencode($civi_contact['last_name']);
       }
       elseif ($civi_contact['contact_type'] == 'Organization') {
-        $salsa_donation['Last_Name'] = $civi_contact['organization_name'];
+        $url .= '&Last_Name=' .
+          urlencode($civi_contact['organization_name']);
       }
-      //$salsa_donation['Email'] = ?;
-      //$salsa_donation['Tracking_Code'] = ?;
-      //$salsa_donation['Donation_Tracking_Code'] = ?;
-      //$salsa_donation['Tax_Status'] = ?;
-      //$salsa_donation['Designation_Code'] = ?;
-      //$salsa_donation['PRIVATE_Donation_Source'] = ?;
-      //$salsa_donation['Note'] = ?;
       if (!empty($civi_contribution['thankyou_date'])) {
-        $salsa_donation['Thank_You_Sent'] = 1;
-        $salsa_donation['Thank_Date'] = $civi_contribution['thankyou_date'];
+        $url .= '&Thank_You_Sent=1&Thank_Date=' .
+          urlencode($civi_contribution['thankyou_date']);
       }
-      //$salsa_donation['referral_supporter_KEY'] = ?;
-      //$salsa_donation['merchant_account_KEY'] = ?;
-      //$salsa_donation['IP_Address'] = ?;
       if (!empty($civi_contribution['honor_type_id'])) {
         // This donation is in honor or memory of somebody
         // First, try to find who is being honored
@@ -1119,13 +1089,13 @@ function cvt_contribution(mysqli $civi, $curl) {
           if ($honored = query_unique($civi, $query)) {
             switch ($honor_type[$civi_contribution['honor_type_id']]['label']) {
               case 'In Honor of':
-                $salsa_donation['In_Honor_Name'] = $honored['display_name'];
-                //$salsa_donation['In_Honor_Email'] = ?;
-                //$salsa_donation['In_Honor_Address'] = ?;
+                $url .= '&In_Honor_Name=' .
+                  urlencode($honored['display_name']);
                 break;
 
               case 'In Memory of':
-                $salsa_donation['In_Memory_Name'] = $honored['display_name'];
+                $url .= '&In_Memory_Name=' .
+                  urlencode($honored['display_name']);
                 break;
 
               default:
@@ -1133,34 +1103,18 @@ function cvt_contribution(mysqli $civi, $curl) {
           }
         }
       }
-      $salsa_donation['uid'] = $civi_contribution['id'];
-      //$salsa_donation['Batch_Code'] = ?;
-      //$salsa_donation['VARCHAR0'] = ?;
-      //$salsa_donation['VARCHAR1'] = ?;
-      //$salsa_donation['VARCHAR2'] = ?;
-      //$salsa_donation['event_fee_KEY'] = ?;
-      //$salsa_donation['Employer'] = ?;
-      //$salsa_donation['Occupation'] = ?;
-      //$salsa_donation['Employer_Street'] = ?;
-      //$salsa_donation['Employer_Street_2'] = ?;
-      //$salsa_donation['Employer_City'] = ?;
-      //$salsa_donation['Employer_State'] = ?;
-      //$salsa_donation['Employer_Zip'] = ?;
-      $salsa_key = save_salsa($curl, 'donation', $salsa_donation,
-        $civi_contribution);
-      $query = "UPDATE civicrm_contribution SET salsa_key = $salsa_key
-        WHERE id = " . $civi_contribution['id']; 
-      if (($result = $civi->query($query)) === FALSE) {
-        printf("Failed to %s: %s\n", $query, $civi->error);
-        exit(1);
+      $url .= '&uid=' . $civi_contribution['id'];
+      if (strlen($url) > 2000) {
+        save_batch($curl, $url);
+        $url = '';
       }
+    }
+    if ($url != '') {
+      save_batch($curl, $url);
     }
     $i++;
     show_status($i, $num_contacts);
   }
-
-  // Add an index on salsa_key to this table
-  add_salsa_key_index($civi, 'civicrm_contribution');
 }
 
 /**
@@ -2906,6 +2860,43 @@ function query_unique(mysqli $civi, $query) {
   }
   $row = $result->fetch_assoc();
   return $row;
+}
+
+/**
+ *  Save a batch of Salsa objects using cURL
+ */
+function save_batch($curl, $url) {
+  $url = SALSA_URL . '/save?xml' . $url;
+  //echo "URL: '$url'\n";
+  curl_setopt_array($curl,
+    array(
+      CURLOPT_URL        => $url,
+      CURLOPT_HTTPGET    => TRUE,
+    )
+  );
+  $xml = curl_exec($curl);
+  //print_r($xml);
+  $pattern = '/<\?xml.*$/s';
+  $matches = array();
+  $result = preg_match($pattern, $xml, $matches);
+  if ($result != 1) {
+    echo "oops, expected XML not found!\n";
+    echo "URL: $url\n";
+    echo "\nXML:\n"; print_r($xml);
+    echo "\n";
+    exit(1);
+  }
+  else {
+    $cleaned_xml = $matches[0];
+    $response = new SimpleXMLElement($cleaned_xml);
+    if ($response->error) {    
+      printf("Failed to store batch: %s", $response->error);
+      echo "\nURL: $url\n";
+      echo "\nXML:\n"; print_r($xml);
+      echo "\n";
+      exit(1);
+    }
+  }
 }
 
 /**
