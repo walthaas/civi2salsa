@@ -2,30 +2,26 @@
 
 /**
  *  Export CiviCRM database to Salsa
- *  
+ *
  *  Copyright (C) 2013 Walt Haas
- *  
+ *
  *  This program is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU General Public License
  *  as published by the Free Software Foundation; either version 2
  *  of the License, or (at your option) any later version.
- *  
+ *
  *  This program is distributed in the hope that it will be useful,
  *  but WITHOUT ANY WARRANTY; without even the implied warranty of
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU General Public License for more details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the
  *  Free Software Foundation, Inc.
  *  51 Franklin Street, Fifth Floor
- *  Boston, MA  02110-1301, USA. 
+ *  Boston, MA  02110-1301, USA.
  *
- *  @todo Figure out what to do with the relationship data stored in
- *    civicrm_relationship.  There doesn't appear to be an equivalent
- *    in Salsa.
  *  @todo Populate soft_credit table
- *  @todo Split off separate password file
  */
 
 include 'params.inc';
@@ -171,7 +167,7 @@ get_event_type($civi);
 // Get honor types from civicrm_option_* tables
 get_honor_type($civi);
 
-// Get location blocks from the civicrm_loc_block table 
+// Get location blocks from the civicrm_loc_block table
 get_loc_blk($civi);
 
 // Get CiviCRM location types from civicrm_location_type table
@@ -323,7 +319,7 @@ function cvt_activity(mysqli $civi, $curl) {
   $civi_option_codes = $civi->query($query);
   if ($civi_option_codes === FALSE) {
     printf("Failed to '%s': %s\n", $query, $civi->error);
-    exit(1); 
+    exit(1);
   }
   $groups = array();
   while ($civi_option_code = $civi_option_codes->fetch_assoc()) {
@@ -342,7 +338,7 @@ function cvt_activity(mysqli $civi, $curl) {
   $civi_activity_types = $civi->query($query);
   if ($civi_activity_types === FALSE) {
     printf("Failed to %s: %s\n", $query, $civi->error);
-    exit(1); 
+    exit(1);
   }
   $activity_type = array();
   while ($civi_activity_type = $civi_activity_types->fetch_assoc()) {
@@ -360,7 +356,7 @@ function cvt_activity(mysqli $civi, $curl) {
   $civi_option_codes = $civi->query($query);
   if ($civi_option_codes === FALSE) {
     printf("Failed to '%s': %s\n", $query, $civi->error);
-    exit(1); 
+    exit(1);
   }
   $groups = array();
   while ($civi_option_code = $civi_option_codes->fetch_assoc()) {
@@ -379,7 +375,7 @@ function cvt_activity(mysqli $civi, $curl) {
   $civi_activity_statuses = $civi->query($query);
   if ($civi_activity_statuses === FALSE) {
     printf("Failed to %s: %s\n", $query, $civi->error);
-    exit(1); 
+    exit(1);
   }
   $activity_status = array();
   while ($civi_activity_status = $civi_activity_statuses->fetch_assoc()) {
@@ -396,7 +392,7 @@ function cvt_activity(mysqli $civi, $curl) {
 
   $civi_contacts = query_contacts($civi);
 
-  // Check all contacts in CiviCRM  
+  // Check all contacts in CiviCRM
   while ($civi_contact = $civi_contacts->fetch_assoc()) {
 
     // For this contact, find their contact history in civicrm_activity
@@ -406,7 +402,7 @@ function cvt_activity(mysqli $civi, $curl) {
     $civi_activities = $civi->query($query);
     if ($civi_activities === FALSE) {
       printf("Failed to'%s': %s\n", $query, $civi->error);
-      exit(1); 
+      exit(1);
     }
     while ($civi_activity = $civi_activities->fetch_assoc()) {
       //print_r($civi_activity);
@@ -514,7 +510,7 @@ function cvt_activity(mysqli $civi, $curl) {
 /**
  *  Convert civicrm_group to Salsa groups table
  *
- *  The contents of the civicrm_group table are converted and 
+ *  The contents of the civicrm_group table are converted and
  *  stored into the Salsa groups table.  Additionally, the
  *  mapping from civicrm_group:id to groups:group_KEY
  *  is stored in global array $group_table for fast access.
@@ -535,7 +531,7 @@ function cvt_group(mysqli $civi, $curl) {
   $group_table = array();
 
   // Add a 'salsa_key' column to the civicrm_group table
-  add_salsa_key($civi, 'civicrm_group');  
+  add_salsa_key($civi, 'civicrm_group');
 
   // Drop the salsa_key_index from this table
   drop_salsa_key_index($civi, 'civicrm_group');
@@ -581,7 +577,7 @@ function cvt_group(mysqli $civi, $curl) {
     //$salsa_groups['join_email_trigger_KEYS'] = ?
     $salsa_key = save_salsa($curl, 'groups', $salsa_groups);
     $query = "UPDATE civicrm_group SET salsa_key = $salsa_key WHERE id = "
-      . $civi_group['id']; 
+      . $civi_group['id'];
     if (($result = $civi->query($query)) === FALSE) {
       printf("Failed to %s: %s\n", $query, $civi->error);
       exit(1);
@@ -602,7 +598,7 @@ function cvt_group(mysqli $civi, $curl) {
  *  converting each row to a row in the Salsa supporters table.  Grab
  *  the supporter_KEY value from Salsa row insertion and store it in
  *  the new salsa_key column of the corresponding row in
- *  civicrm_contact for future reference. 
+ *  civicrm_contact for future reference.
  *
  *  The civicrm_contact table stores names in multiple ways:
  *    sort_name column:
@@ -672,7 +668,7 @@ function cvt_contact(mysqli $civi, $curl) {
     $salsa_supporter['key'] = 0;
     // Date_Created and Last_Modified will be set by the Salsa server
     // when we save this.
-    $salsa_supporter['Title'] = !empty($civi_contact['prefix_id']) 
+    $salsa_supporter['Title'] = !empty($civi_contact['prefix_id'])
       ? $prefix[$civi_contact['prefix_id']] : NULL;;
     if ($civi_contact['contact_type'] == 'Individual') {
       $salsa_supporter['First_Name'] = $civi_contact['first_name'];
@@ -731,7 +727,6 @@ function cvt_contact(mysqli $civi, $curl) {
     //$salsa_supporter['Other_Data_1'] = ?;
     //$salsa_supporter['Other_Data_2'] = ?;
     //$salsa_supporter['Other_Data_3'] = ?;
-    //$salsa_supporter['Notes'] = ?;
     //$salsa_supporter['Source'] = ?;
     //$salsa_supporter['Source_Details'] = ?;
     //$salsa_supporter['Source_Tracking_Code'] = ?;
@@ -740,7 +735,7 @@ function cvt_contact(mysqli $civi, $curl) {
     $salsa_supporter['uid'] = $civi_contact['id'];
     // civicrm_contact uses the xx_XX form of language code.
     // Salsa stores only the first three characters.  Save Our Canyons
-    // doesn't actuall use the language code.
+    // doesn't actually use the language code.
     $salsa_supporter['Language_Code'] = 'eng';
 
     // Get this contact's phones from civicrm_phone
@@ -749,7 +744,7 @@ function cvt_contact(mysqli $civi, $curl) {
     if ($civi_phones === FALSE) {
       printf("Failed to SELECT * FROM civicrm_phone WHERE"
         . " contact_id = %s: %s\n", $civi->contact['id'], $civi->error);
-      exit(1); 
+      exit(1);
     }
     while ($civi_phone = $civi_phones->fetch_assoc()) {
       $loc = $loc_type[$civi_phone['location_type_id']];
@@ -767,7 +762,7 @@ function cvt_contact(mysqli $civi, $curl) {
     if ($civi_addresses === FALSE) {
       printf("Failed to SELECT * FROM civicrm_address WHERE"
         . " contact_id = %s: %s\n", $civi->contact['id'], $civi->error);
-      exit(1); 
+      exit(1);
     }
     $addr_ary = array();
     while ($civi_address = $civi_addresses->fetch_assoc()) {
@@ -800,9 +795,9 @@ function cvt_contact(mysqli $civi, $curl) {
       $salsa_supporter['Street_2'] = $addr_ary[0]['sup_addr_1'];
       $salsa_supporter['Street_3'] = $addr_ary[0]['sup_addr_2'];
       $salsa_supporter['City']   = $addr_ary[0]['city'];
-      $salsa_supporter['County'] =  !empty($addr_ary[0]['county_id']) 
+      $salsa_supporter['County'] =  !empty($addr_ary[0]['county_id'])
         ? $county[$addr_ary[0]['county_id']] : NULL;;
-      $salsa_supporter['State']  = !empty($addr_ary[0]['state_id']) 
+      $salsa_supporter['State']  = !empty($addr_ary[0]['state_id'])
         ? $state[$addr_ary[0]['state_id']] : NULL;
       $salsa_supporter['Country']  = !empty($addr_ary[0]['country_id'])
         ? $cntry[$addr_ary[0]['country_id']] : NULL;
@@ -824,9 +819,9 @@ function cvt_contact(mysqli $civi, $curl) {
             $salsa_supporter['Street_2'] = $addr['sup_addr_1'];
             $salsa_supporter['Street_3'] = $addr['sup_addr_2'];
             $salsa_supporter['City']   = $addr['city'];
-            $salsa_supporter['County'] =  !empty($addr['county_id']) 
+            $salsa_supporter['County'] =  !empty($addr['county_id'])
               ? $county[$addr['county_id']] : NULL;;
-            $salsa_supporter['State']  = !empty($addr['state_id']) 
+            $salsa_supporter['State']  = !empty($addr['state_id'])
               ? $state[$addr['state_id']] : NULL;
             $salsa_supporter['Country']  = !empty($addr['country_id'])
               ? $cntry[$addr['country_id']] : NULL;
@@ -840,12 +835,44 @@ function cvt_contact(mysqli $civi, $curl) {
       }
     }
 
+    // Addressee
+    if (empty($civi_contact['addressee_display']) ||
+      ($civi_contact['addressee_display'] == 'Customized')) {
+      $salsa_supporter['Addressee'] = 'Friend';
+    }
+    else {
+      $salsa_supporter['Addressee'] = $civi_contact['addressee_display'];
+    }
+
+    // Postal Greeting
+    if (empty($civi_contact['postal_greeting_display']) ||
+      ($civi_contact['postal_greeting_display'] == 'Customized')) {
+      $salsa_supporter['Postal_Greeting'] = 'Friend';
+    }
+    else {
+      $salsa_supporter['Postal_Greeting'] = $civi_contact['postal_greeting_display'];
+    }
+
+    // Email Greeting
+    if (empty($civi_contact['email_greeting_display']) ||
+      ($civi_contact['email_greeting_display'] == 'Customized')) {
+      $salsa_supporter['Email_Greeting'] = 'Friend';
+    }
+    else {
+      $salsa_supporter['Email_Greeting'] = $civi_contact['email_greeting_display'];
+    }
+
+    // Get this contact's note, if any, from civicrm_note
+    if ($civi_note = query_note($civi, 'civicrm_contact', $civi_contact['id'])) {
+      $salsa_supporter['Notes'] = $civi_note;
+    }
+
     // Store the Salsa supporter row, grab the supporter_KEY value and
     // store it in the original civicrm_contact row.
     $salsa_key = save_salsa($curl, 'supporter', $salsa_supporter,
       $civi_contact);
     $query = "UPDATE civicrm_contact SET salsa_key = $salsa_key WHERE id = "
-      . $civi_contact['id']; 
+      . $civi_contact['id'];
     $civi_salsa[$civi_contact['id']] = array(
       'supporter_KEY' => $salsa_key,
       'last_name'     => $civi_contact['last_name'],
@@ -862,7 +889,7 @@ function cvt_contact(mysqli $civi, $curl) {
     if ($civi_emails === FALSE) {
       printf("Failed to SELECT * FROM civicrm_emails WHERE"
         . " contact_id = %s: %s\n", $civi->contact['id'], $civi->error);
-      exit(1); 
+      exit(1);
     }
 
     // Find unique email addresses by discarding category information
@@ -900,7 +927,7 @@ function cvt_contact(mysqli $civi, $curl) {
       );
       $xml = curl_exec($curl);
       $response = new SimpleXMLElement($xml);
-      if ($response->error) {    
+      if ($response->error) {
         // Emit an error message then ignore the error.  Salsa has a
         // more aggressive screen for bad emails than PHP filter_var()
         // so some bad emails just won't be stored.
@@ -960,9 +987,10 @@ function cvt_contribution(mysqli $civi, $curl) {
   // Count donations added to Salsa
   $i = 0;
 
-  // Check all contacts in CiviCRM  
+  // Check all contacts in CiviCRM
   $civi_contacts = query_contacts($civi);
   $num_contacts = $civi_contacts->num_rows;
+  //printf("Processing contributions for %d contacts\n", $num_contacts);
   while ($civi_contact = $civi_contacts->fetch_assoc()) {
     if (empty($civi_contact['salsa_key'])) {
       continue;
@@ -975,9 +1003,11 @@ function cvt_contribution(mysqli $civi, $curl) {
     $civi_contributions = $civi->query($query);
     if ($civi_contributions === FALSE) {
       printf("Failed to'%s': %s\n", $query, $civi->error);
-      exit(1); 
+      exit(1);
     }
     $url = '';
+    //printf("Found %d contributions for contact %d\n",
+    //  $civi_contributions->num_rows, $civi_contact['id']);
     while ($civi_contribution = $civi_contributions->fetch_assoc()) {
       //print_r($civi_contribution);
       // Ignore test data
@@ -992,7 +1022,7 @@ function cvt_contribution(mysqli $civi, $curl) {
         $query = 'SELECT * FROM civicrm_contribution_recur WHERE id = '
           . $civi_contribution['contribution_recur_id'];
         $recur = query_unique($civi, $query);
-        if ($recur) {        
+        if ($recur) {
           $url .= '&recurring_donation_KEY=' . $recur['salsa_key'];
         }
       }
@@ -1016,7 +1046,7 @@ function cvt_contribution(mysqli $civi, $curl) {
 
         case 'Grant':
           $Transaction_Type = 'Donation';
-	  $url .= '&Status=Donation%20Only';
+	        $url .= '&Status=Donation%20Only';
           break;
 
         case 'In-Kind':
@@ -1036,7 +1066,7 @@ function cvt_contribution(mysqli $civi, $curl) {
       // transaction type as 'Recurring' so it will show up on the
       // recurring donations page in Salsa.
       if (!empty($salsa_donation['recurring_donation_KEY'])) {
-        $transaction_type = 'Recurring'; 
+        $transaction_type = 'Recurring';
       }
       $url .= '&Transaction_Type=' . $transaction_type;
       if (!empty($civi_contribution['payment_instrument_id'])) {
@@ -1085,7 +1115,7 @@ function cvt_contribution(mysqli $civi, $curl) {
         // First, try to find who is being honored
         if (!empty($civi_contribution['honor_contact_id'])) {
           $query = 'SELECT * FROM civicrm_contact WHERE id =' .
-	    $civi_contribution['honor_contact_id'];
+	          $civi_contribution['honor_contact_id'];
           if ($honored = query_unique($civi, $query)) {
             switch ($honor_type[$civi_contribution['honor_type_id']]['label']) {
               case 'In Honor of':
@@ -1103,18 +1133,32 @@ function cvt_contribution(mysqli $civi, $curl) {
           }
         }
       }
+
+      // Get this contribution's note, if any, from civicrm_note
+      if ($civi_note = query_note($civi, 'civicrm_contribution',
+        $civi_contribution['id'])) {
+        $url .= '&Note=' . urlencode($civi_note);
+      }
+
+      // This contribution's source, if any
+      if (!empty($civi_contribution['source'])) {
+        $url .= '&VARCHAR0=' . urlencode($civi_contribution['source']);
+      }
+
       $url .= '&uid=' . $civi_contribution['id'];
       if (strlen($url) > 2000) {
+        //print_r($url);
         save_batch($curl, $url);
         $url = '';
       }
-    }
+    }  // while contributions
     if ($url != '') {
+      //print_r($url);
       save_batch($curl, $url);
     }
     $i++;
     show_status($i, $num_contacts);
-  }
+  }  // while contacts
 }
 
 /**
@@ -1138,7 +1182,7 @@ function cvt_contribution_recur(mysqli $civi, $curl) {
   // Date right now
   $now = new DateTime();
 
-  // Check all contacts in CiviCRM  
+  // Check all contacts in CiviCRM
   $civi_contacts = query_contacts($civi);
   $num_contacts = $civi_contacts->num_rows;
   while ($civi_contact = $civi_contacts->fetch_assoc()) {
@@ -1156,7 +1200,7 @@ function cvt_contribution_recur(mysqli $civi, $curl) {
     $civi_contribs_recur = $civi->query($query);
     if ($civi_contribs_recur === FALSE) {
       printf("Failed to'%s': %s\n", $query, $civi->error);
-      exit(1); 
+      exit(1);
     }
     while ($civi_contrib_recur = $civi_contribs_recur->fetch_assoc()) {
       if ($civi_contrib_recur['is_test']) {
@@ -1230,7 +1274,7 @@ function cvt_contribution_recur(mysqli $civi, $curl) {
       $salsa_recurring_donation['First_Name'] = $civi_contact['first_name'];
       $salsa_recurring_donation['Last_Name'] = $civi_contact['last_name'];
       //$salsa_recurring_donation['Tax_Status'] = ?;
-      
+
       switch ($contribution_status[$civi_contrib_recur['contribution_status_id']]) {
       case 'Cancelled':
 	break;
@@ -1250,7 +1294,7 @@ function cvt_contribution_recur(mysqli $civi, $curl) {
       case 'Pending':
         // This is the only code Save Our Canyons actually uses
         $salsa_recurring_donation['Status'] = 'Active';
-        
+
 	break;
 
       default:
@@ -1299,7 +1343,7 @@ function cvt_contribution_recur(mysqli $civi, $curl) {
         $salsa_recurring_donation, $civi_contrib_recur);
       //echo "salsa_key: $salsa_key\n";
       $query = "UPDATE civicrm_contribution_recur SET salsa_key = $salsa_key
-        WHERE id = " . $civi_contrib_recur['id']; 
+        WHERE id = " . $civi_contrib_recur['id'];
       if (($result = $civi->query($query)) === FALSE) {
         printf("Failed to %s: %s\n", $query, $civi->error);
         exit(1);
@@ -1321,7 +1365,7 @@ function cvt_contribution_soft(mysqli $civi, $curl) {
   echo "Adding soft donations to Salsa\n";
   $i = 0;
 
-  // Check all contacts in CiviCRM  
+  // Check all contacts in CiviCRM
   $civi_contacts = query_contacts($civi);
   $num_contacts = $civi_contacts->num_rows;
   while ($civi_contact = $civi_contacts->fetch_assoc()) {
@@ -1334,7 +1378,7 @@ function cvt_contribution_soft(mysqli $civi, $curl) {
     $civi_contribs_soft = $civi->query($query);
     if ($civi_contribs_soft === FALSE) {
       printf("Failed to'%s': %s\n", $query, $civi->error);
-      exit(1); 
+      exit(1);
     }
     while ($civi_contrib_soft = $civi_contribs_soft->fetch_assoc()) {
       print_r($civi_contrib_soft);
@@ -1411,7 +1455,7 @@ function cvt_group_contact(mysqli $civi, $curl) {
   // Count supporter <=> group mappings
   $i = 0;
 
-  // Check all contacts in CiviCRM  
+  // Check all contacts in CiviCRM
   $civi_contacts = query_contacts($civi);
   $num_contacts = $civi_contacts->num_rows;
   while ($civi_contact = $civi_contacts->fetch_assoc()) {
@@ -1422,25 +1466,25 @@ function cvt_group_contact(mysqli $civi, $curl) {
     }
 
     //printf("groups for CID=%s key=%s: ",
-    //  $civi_contact['id'], $civi_contact['salsa_key']); 
+    //  $civi_contact['id'], $civi_contact['salsa_key']);
     // For this contact, find their groups in civicrm_group_contact
     $query = 'SELECT * FROM civicrm_group_contact WHERE contact_id = ' .
       $civi_contact['id'];
     $civi_groups = $civi->query($query);
     if ($civi_groups === FALSE) {
       printf("Failed to'%s': %s\n", $query, $civi->error);
-      exit(1); 
+      exit(1);
     }
     //printf("found %d groups\n", $civi_groups->num_rows);
     $url = '';
     while ($civi_group = $civi_groups->fetch_assoc()) {
       if (!array_key_exists($civi_group['group_id'], $group_table)) {
         printf("group id=%d is not in group table, ignoring\n",
-          $civi_group['group_id']); 
+          $civi_group['group_id']);
         continue;
       }
       $url .= '&object=supporter_groups&supporter_KEY=' .
-        $civi_contact['salsa_key'] . '&groups_KEY=' . 
+        $civi_contact['salsa_key'] . '&groups_KEY=' .
         $group_table[$civi_group['group_id']];
     }
     if ($url != '') {
@@ -1463,7 +1507,7 @@ function cvt_group_contact(mysqli $civi, $curl) {
 	$cleaned_xml = $matches[0];
       }
       $response = new SimpleXMLElement($cleaned_xml);
-      if ($response->error) {    
+      if ($response->error) {
 	printf("Failed to store supporter_groups: %s", $response->error);
 	echo "\nURL: $url\n";
 	echo "\nXML:\n"; print_r($xml);
@@ -1510,7 +1554,7 @@ function cvt_event(mysqli $civi, $curl) {
   if ($civi_events === FALSE) {
     printf("Failed to SELECT * FROM civicrm_event: %s\n",
       $civi->error);
-    exit(1); 
+    exit(1);
   }
   $num_events = $civi_events->num_rows;
   while ($civi_event = $civi_events->fetch_assoc()) {
@@ -1603,7 +1647,7 @@ function cvt_event(mysqli $civi, $curl) {
 
     $salsa_key = save_salsa($curl, 'event', $salsa_event);
     $query = "UPDATE civicrm_event SET salsa_key = $salsa_key WHERE id = "
-      . $civi_event['id']; 
+      . $civi_event['id'];
     if (($result = $civi->query($query)) === FALSE) {
       printf("Failed to %s: %s\n", $query, $civi->error);
       exit(1);
@@ -1810,7 +1854,7 @@ function cvt_participant(mysqli $civi, $curl) {
   $civi_participant_status_types = $civi->query($query);
   if ($civi_participant_status_types === FALSE) {
     printf("Failed to '$query': %s\n", $civi->error);
-    exit(1); 
+    exit(1);
   }
   while ($civi_participant_status_type =
     $civi_participant_status_types->fetch_assoc()) {
@@ -1828,7 +1872,7 @@ function cvt_participant(mysqli $civi, $curl) {
   $civi_option_codes = $civi->query($query);
   if ($civi_option_codes === FALSE) {
     printf("Failed to %s: %s\n", $query, $civi->error);
-    exit(1); 
+    exit(1);
   }
   $groups = array();
   while ($civi_option_code = $civi_option_codes->fetch_assoc()) {
@@ -1847,7 +1891,7 @@ function cvt_participant(mysqli $civi, $curl) {
   $civi_participant_roles = $civi->query($query);
   if ($civi_participant_roles === FALSE) {
     printf("Failed to '%s': %s\n", $query, $civi->error);
-    exit(1); 
+    exit(1);
   }
   $participant_roles = array();
   while ($civi_participant_role = $civi_participant_roles->fetch_assoc()) {
@@ -1874,7 +1918,7 @@ function cvt_participant(mysqli $civi, $curl) {
     $civi_participants = $civi->query($query);
     if ($civi_participants === FALSE) {
       printf("Failed to '%s': %s\n", $query, $civi->error);
-      exit(1); 
+      exit(1);
     }
     // For this contact, check all participation
     $at_event = array();
@@ -1940,7 +1984,13 @@ function cvt_participant(mysqli $civi, $curl) {
       default:
       }
       //$salsa_sup_evt['Additional_Attendees'] = $civi_participant['?'];
-      //$salsa_sup_evt['Feedback'] = $civi_participant['?'];
+
+      // Get this participant's note, if any, from civicrm_note
+      if ($civi_note = query_note($civi, 'civicrm_participant',
+        $civi_participant['id'])) {
+        $salsa_sup_evt['Feedback'] = $civi_note;
+      }
+
       //print_r($salsa_sup_evt);
       $salsa_key = save_salsa($curl, 'supporter_event', $salsa_sup_evt);
     }
@@ -1966,7 +2016,7 @@ function cvt_participant(mysqli $civi, $curl) {
 function cvt_pledge(mysqli $civi, $curl) {
 
   global $contribution_status, $contribution_types;
-  
+
   echo "Adding CiviCRM pledges to Salsa recurring donations\n";
 
   // Add a 'salsa_key' column to civicrm_pledge
@@ -1981,7 +2031,7 @@ function cvt_pledge(mysqli $civi, $curl) {
   // Date right now
   $now = new DateTime();
 
-  // Check all contacts in CiviCRM  
+  // Check all contacts in CiviCRM
   $civi_contacts = query_contacts($civi);
   $num_contacts = $civi_contacts->num_rows;
   while ($civi_contact = $civi_contacts->fetch_assoc()) {
@@ -1997,7 +2047,7 @@ function cvt_pledge(mysqli $civi, $curl) {
     $civi_pledges = $civi->query($query);
     if ($civi_pledges === FALSE) {
       printf("Failed to'%s': %s\n", $query, $civi->error);
-      exit(1); 
+      exit(1);
     }
     while ($civi_pledge = $civi_pledges->fetch_assoc()) {
       if ($civi_pledge['is_test']) {
@@ -2071,7 +2121,7 @@ function cvt_pledge(mysqli $civi, $curl) {
       //$salsa_recurring_donation['Tax_Status'] = ?;
 
       // FIXME: contribution type?
-      
+
       switch ($contribution_status[$civi_pledge['status_id']]) {
       case 'Cancelled':
       case 'Completed':
@@ -2143,7 +2193,7 @@ function cvt_pledge(mysqli $civi, $curl) {
         $salsa_recurring_donation, $civi_pledge);
       //echo "salsa_key: $salsa_key\n";
       $query = "UPDATE civicrm_pledge SET salsa_key = $salsa_key
-        WHERE id = " . $civi_pledge['id']; 
+        WHERE id = " . $civi_pledge['id'];
       if (($result = $civi->query($query)) === FALSE) {
         printf("Failed to %s: %s\n", $query, $civi->error);
         exit(1);
@@ -2171,7 +2221,7 @@ function cvt_relationships(mysqli $civi, $curl) {
   $civi_relationships = $civi->query($query);
   if ($civi_relationships === FALSE) {
     printf("Failed to '%s': %s\n", $query, $civi->error);
-    exit(1);      
+    exit(1);
   }
   $num_rels = $civi_relationships->num_rows;
   printf("Adding %d relationships to Salsa\n", $num_rels);
@@ -2324,7 +2374,7 @@ function get_contribution_status(mysqli $civi) {
   $civi_option_codes = $civi->query($query);
   if ($civi_option_codes === FALSE) {
     printf("Failed to '%s': %s\n", $query, $civi->error);
-    exit(1); 
+    exit(1);
   }
   $groups = array();
   while ($civi_option_code = $civi_option_codes->fetch_assoc()) {
@@ -2343,12 +2393,12 @@ function get_contribution_status(mysqli $civi) {
   $civi_contribution_statuses = $civi->query($query);
   if ($civi_contribution_statuses === FALSE) {
     printf("Failed to '%s': %s\n", $query, $civi->error);
-    exit(1); 
+    exit(1);
   }
   $contribution_status = array();
   while ($civi_contribution_status =
     $civi_contribution_statuses->fetch_assoc()) {
-    $contribution_status[$civi_contribution_status['value']] = 
+    $contribution_status[$civi_contribution_status['value']] =
       $civi_contribution_status['label'];
   }
   //print_r($contribution_status);
@@ -2367,7 +2417,7 @@ function get_contribution_type(mysqli $civi) {
   $civi_contribution_types = $civi->query($query);
   if ($civi_contribution_types === FALSE) {
     printf("Failed to '$query': %s\n", $civi->error);
-    exit(1); 
+    exit(1);
   }
   while ($civi_contribution_type = $civi_contribution_types->fetch_assoc()) {
     $contribution_types[$civi_contribution_type['id']] =
@@ -2387,7 +2437,7 @@ function get_county(mysqli $civi) {
   if ($civi_counties === FALSE) {
     printf("Failed to SELECT * FROM civicrm_county: %s\n",
       $civi->error);
-    exit(1); 
+    exit(1);
   }
   $county = array();
   while ($civi_county = $civi_counties->fetch_assoc()) {
@@ -2406,7 +2456,7 @@ function get_cntry(mysqli $civi) {
   if ($civi_countries === FALSE) {
     printf("Failed to SELECT * FROM civicrm_country: %s\n",
       $civi->error);
-    exit(1); 
+    exit(1);
   }
   $cntry = array();
   while ($civi_country = $civi_countries->fetch_assoc()) {
@@ -2427,7 +2477,7 @@ function get_event_type(mysqli $civi) {
   if ($civi_option_codes === FALSE) {
     printf("Failed to SELECT 'event_type' FROM"
       . " civicrm_option_group: %s\n", $civi->error);
-    exit(1); 
+    exit(1);
   }
   $groups = array();
   while ($civi_option_code = $civi_option_codes->fetch_assoc()) {
@@ -2446,7 +2496,7 @@ function get_event_type(mysqli $civi) {
   if ($civi_event_types === FALSE) {
     printf("Failed to SELECT * FROM civicrm_option_value WHERE"
       . " option_group_id = %d: %s\n", $event_type_group, $civi->error);
-    exit(1); 
+    exit(1);
   }
   $event_type = array();
   while ($civi_event_type = $civi_event_types->fetch_assoc()) {
@@ -2473,7 +2523,7 @@ function get_honor_type(mysqli $civi) {
   if ($civi_option_codes === FALSE) {
     printf("Failed to SELECT 'honor_type' FROM"
       . " civicrm_option_group: %s\n", $civi->error);
-    exit(1); 
+    exit(1);
   }
   $groups = array();
   while ($civi_option_code = $civi_option_codes->fetch_assoc()) {
@@ -2492,7 +2542,7 @@ function get_honor_type(mysqli $civi) {
   if ($civi_honor_types === FALSE) {
     printf("Failed to SELECT * FROM civicrm_option_value WHERE"
       . " option_group_id = %d: %s\n", $honor_type_group, $civi->error);
-    exit(1); 
+    exit(1);
   }
   $honor_type = array();
   while ($civi_honor_type = $civi_honor_types->fetch_assoc()) {
@@ -2516,7 +2566,7 @@ function get_loc_blk(mysqli $civi) {
   if ($civi_loc_blks === FALSE) {
     printf("Failed to SELECT * FROM civicrm_loc_block: %s\n",
       $civi->error);
-    exit(1); 
+    exit(1);
   }
   $loc_blk = array();
   while ($civi_loc_blk = $civi_loc_blks->fetch_assoc()) {
@@ -2529,7 +2579,7 @@ function get_loc_blk(mysqli $civi) {
     if ($civi_loc_addr === FALSE) {
       printf("Failed to SELECT * FROM civicrm_address"
         . " WHERE id = $addr_id: %s\n",	$civi->error);
-      exit(1); 
+      exit(1);
     }
 
     // There should be exactly one address per address ID
@@ -2542,9 +2592,9 @@ function get_loc_blk(mysqli $civi) {
     $loc_blk[$civi_loc_blk['id']]['city'] = $loc_addr['city'];
     $loc_blk[$civi_loc_blk['id']]['zip'] = $loc_addr['postal_code'];
     $loc_blk[$civi_loc_blk['id']]['state']  =
-      !empty($loc_addr['state_province_id']) 
+      !empty($loc_addr['state_province_id'])
       ? $state[$loc_addr['state_province_id']] : NULL;
-    $loc_blk[$civi_loc_blk['id']]['country']  = !empty($loc_addr['country_id']) 
+    $loc_blk[$civi_loc_blk['id']]['country']  = !empty($loc_addr['country_id'])
       ? $cntry[$loc_addr['country_id']] : NULL;
     $loc_blk[$civi_loc_blk['id']]['latitude']  = $loc_addr['geo_code_1'];
     $loc_blk[$civi_loc_blk['id']]['longitude']  = $loc_addr['geo_code_2'];
@@ -2556,7 +2606,7 @@ function get_loc_blk(mysqli $civi) {
       if ($civi_loc_email === FALSE) {
         printf("Failed to SELECT * FROM civicrm_email"
           . " WHERE id = $email_id: %s\n", $civi->error);
-        exit(1); 
+        exit(1);
       }
       // There should be exactly one email per email ID
       $loc_email = $civi_loc_email->fetch_assoc();
@@ -2570,7 +2620,7 @@ function get_loc_blk(mysqli $civi) {
       if ($civi_loc_phone === FALSE) {
         printf("Failed to SELECT * FROM civicrm_phone"
           . " WHERE id = $phone_id: %s\n", $civi->error);
-        exit(1); 
+        exit(1);
       }
       // There should be exactly one phone number per phone ID
       $loc_phone = $civi_loc_phone->fetch_assoc();
@@ -2591,7 +2641,7 @@ function get_loc_type(mysqli $civi) {
   if ($civi_location_types === FALSE) {
     printf("Failed to SELECT * FROM civicrm_location_type: %s\n",
       $civi->error);
-    exit(1); 
+    exit(1);
   }
   $loc_type = array();
   while ($civi_location_type = $civi_location_types->fetch_assoc()) {
@@ -2614,7 +2664,7 @@ function get_payment_instrument(mysqli $civi) {
   if ($civi_option_codes === FALSE) {
     printf("Failed to SELECT 'payment_instrument' FROM"
       . " civicrm_option_group: %s\n", $civi->error);
-    exit(1); 
+    exit(1);
   }
   $groups = array();
   while ($civi_option_code = $civi_option_codes->fetch_assoc()) {
@@ -2633,7 +2683,7 @@ function get_payment_instrument(mysqli $civi) {
   if ($civi_payment_insts === FALSE) {
     printf("Failed to SELECT * FROM civicrm_option_value WHERE"
       . " option_group_id = %d: %s\n", $payment_inst_group, $civi->error);
-    exit(1); 
+    exit(1);
   }
   $payment_instrument = array();
   while ($civi_payment_inst = $civi_payment_insts->fetch_assoc()) {
@@ -2657,7 +2707,7 @@ function get_prefix(mysqli $civi) {
   if ($civi_option_codes === FALSE) {
     printf("Failed to SELECT 'individual_prefix' FROM"
       . " civicrm_option_group: %s\n", $civi->error);
-    exit(1); 
+    exit(1);
   }
   $groups = array();
   while ($civi_option_code = $civi_option_codes->fetch_assoc()) {
@@ -2676,7 +2726,7 @@ function get_prefix(mysqli $civi) {
   if ($civi_prefixes === FALSE) {
     printf("Failed to SELECT * FROM civicrm_option_value WHERE"
       . " option_group_id = %d: %s\n", $prefix_group, $civi->error);
-    exit(1); 
+    exit(1);
   }
   $prefix = array();
   while ($civi_prefix = $civi_prefixes->fetch_assoc()) {
@@ -2712,7 +2762,7 @@ function get_relationships(mysqli $civi) {
   $civi_relationships = $civi->query($query);
   if ($civi_relationships === FALSE) {
     printf("Failed to '%s': %s\n", $query, $civi->error);
-    exit(1);      
+    exit(1);
   }
 
   $relationships = array();
@@ -2737,7 +2787,7 @@ function get_relationships(mysqli $civi) {
         //echo "household: "; print_r($relationships[$key]); echo "\n";
         continue 2;
       }
-    }    
+    }
     // No household has either of these contacts yet,
     // so make a new household to contain them.
     $relationships[] = array(
@@ -2763,7 +2813,7 @@ function get_relationship_type(mysqli $civi) {
   $civi_relationship_types = $civi->query($query);
   if ($civi_relationship_types === FALSE) {
     printf("Failed to '%s': %s\n", $query, $civi->error);
-    exit(1); 
+    exit(1);
   }
   $relationship_type = array();
   while ($civi_relationship_type = $civi_relationship_types->fetch_assoc()) {
@@ -2786,7 +2836,7 @@ function get_state(mysqli $civi) {
   if ($civi_states === FALSE) {
     printf("Failed to SELECT * FROM civicrm_state_province: %s\n",
       $civi->error);
-    exit(1); 
+    exit(1);
   }
   $state = array();
   while ($civi_state = $civi_states->fetch_assoc()) {
@@ -2803,7 +2853,7 @@ function is_row_present(mysqli $civi, $table, $id) {
   $row_exist = $civi->query($query);
   if ($row_exist === FALSE) {
     printf("Failed to'%s': %s\n", $query, $civi->error);
-    exit(1); 
+    exit(1);
   }
   $row_count = $row_exist->fetch_assoc();
   if ($row_count['COUNT(*)'] == 1) {
@@ -2832,10 +2882,38 @@ function query_contacts(mysqli $civi) {
   $civi_contacts = $civi->query($query);
   if ($civi_contacts === FALSE) {
     printf("Failed to '$query': %s\n", $civi->error);
-    exit(1); 
+    exit(1);
   }
   //printf("%d rows returned by query\n", $civi_contacts->num_rows);
   return $civi_contacts;
+}
+
+/**
+ *  Query the note(s) for an entity
+ *
+ *  Sometimes there is more than one row in civicrm_note for a given
+ *  entity_table and entity_id.  In that case, we combine all the notes
+ *  into one text string.
+ */
+function query_note(mysqli $civi, $entity_table, $entity_id) {
+  $query = "SELECT * FROM civicrm_note WHERE entity_id = $entity_id " .
+    " AND entity_table = '$entity_table'";
+  $civi_notes = $civi->query($query);
+  if ($civi_notes === FALSE) {
+    printf("Failed to '$query': %s\n", $civi->error);
+    exit(1);
+  }
+  if ($civi_notes->num_rows == 0) {
+    return NULL;
+  }
+  $note = '';
+  while ($civi_note = $civi_notes->fetch_assoc()) {
+    if ($note != '') {
+      $note .= "\n\n";
+    }
+    $note .= $civi_note['note'];
+  }
+  return $note;
 }
 
 /**
@@ -2848,7 +2926,7 @@ function query_unique(mysqli $civi, $query) {
   $result = $civi->query($query);
   if ($result === FALSE) {
     printf("Failed to '$query': %s\n", $civi->error);
-    exit(1); 
+    exit(1);
   }
   if ($result->num_rows == 0) {
     return FALSE;
@@ -2889,7 +2967,7 @@ function save_batch($curl, $url) {
   else {
     $cleaned_xml = $matches[0];
     $response = new SimpleXMLElement($cleaned_xml);
-    if ($response->error) {    
+    if ($response->error) {
       printf("Failed to store batch: %s", $response->error);
       echo "\nURL: $url\n";
       echo "\nXML:\n"; print_r($xml);
@@ -2906,7 +2984,7 @@ function save_batch($curl, $url) {
  */
 function save_salsa($curl, $obj_name, array $obj_val, $civi_row = array()) {
 
-    $url = SALSA_URL . '/save?xml&object='. $obj_name . '&' . 
+    $url = SALSA_URL . '/save?xml&object='. $obj_name . '&' .
       http_build_query($obj_val, '', '&');
     if ($obj_name == 'soft_credit') {
       printf("URL: %s\n", $url);
@@ -2928,7 +3006,7 @@ function save_salsa($curl, $obj_name, array $obj_val, $civi_row = array()) {
       $cleaned_xml = $matches[0];
     }
     $response = new SimpleXMLElement($cleaned_xml);
-    if ($response->error) {    
+    if ($response->error) {
       printf("Failed to store object %s: %s",
       $obj_name, $response->error);
       echo "\nURL: $url\n";
@@ -2944,19 +3022,19 @@ function save_salsa($curl, $obj_name, array $obj_val, $civi_row = array()) {
       exit(1);
     }
     $response_ary = (array)$response->success->attributes();
-    $key = $response_ary['@attributes']['key']; 
+    $key = $response_ary['@attributes']['key'];
     if (empty($key)) {
       echo "\nNo key returned from Salsa save.  XML:\n";
       print_r($xml);
       echo "\n";
-      exit(1);     
+      exit(1);
     }
     return $key;
 }
 
 /**
  * show a status bar in the console
- * 
+ *
  * <code>
  * for($x=1;$x<=100;$x++){
  *     show_status($x, 100);
