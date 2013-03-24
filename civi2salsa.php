@@ -1034,9 +1034,8 @@ function cvt_contribution(mysqli $civi, $curl) {
         switch ($contribution_types[$civi_contribution[
           'contribution_type_id']]['name']) {
         case 'Auction':
-        case 'Sales':
           $transaction_type = 'Purchase';
-          $url .= '&Status=Order%20Fulfilled';
+          $url .= '&Status=Event%20Fee';
           break;
 
         case 'Event fee':
@@ -1054,8 +1053,12 @@ function cvt_contribution(mysqli $civi, $curl) {
           break;
 
         case 'Membership':
-          $transaction_type = 'Renewal';
+          $transaction_type = 'Donation';
           break;
+
+        case 'Sales':
+          $transaction_type = 'Purchase';
+          $url .= '&Status=Order%20Fulfilled';
 
         default:
           $transaction_type = 'Other';
